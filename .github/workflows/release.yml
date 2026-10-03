@@ -55,10 +55,6 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf
 
-      - name: Install dependencies (windows only)
-        if: matrix.platform == 'windows-latest'
-        run: cargo install --force trusted-signing-cli
-
       - name: Install frontend dependencies
         run: npm install --ignore-scripts
 
@@ -77,14 +73,17 @@ jobs:
           prerelease: false
           args: ${{ matrix.args }}
 
+
       # Fix AppImage for Wayland compatibility by removing bundled EGL/OpenGL libraries
       # that conflict with system libraries and cause EGL_BAD_PARAMETER errors
       - name: Post-process AppImage for Wayland compatibility
         if: matrix.platform == 'ubuntu-latest'
+        env:
+          # Run appimagetool without FUSE
+          APPIMAGE_EXTRACT_AND_RUN: 1
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         run: |
-          # Install libfuse2 for AppImage support
-          sudo apt-get install -y libfuse2
-
           # Find the built AppImage
           APPIMAGE=$(find src-tauri/target/release/bundle/appimage -name "*.AppImage" -type f | head -1)
           if [ -z "$APPIMAGE" ]; then
@@ -96,19 +95,17 @@ jobs:
 
           # Make it executable and extract
           chmod +x "$APPIMAGE"
-          "$APPIMAGE" --appimage-extract
+          "$APPIMAGE" --appimage-extract > /dev/null
 
           # Remove conflicting EGL/OpenGL libraries that cause issues on Wayland
           echo "Removing conflicting EGL/OpenGL libraries..."
-          cd squashfs-root/usr/lib
-          rm -f libEGL.so* libEGL_mesa.so* 2>/dev/null || true
-          rm -f libGL.so* libGLX.so* libGLX_mesa.so* libGLdispatch.so* 2>/dev/null || true
-          rm -f libwayland-client.so* libwayland-egl.so* libwayland-cursor.so* 2>/dev/null || true
-          rm -f libdrm.so* libgbm.so* 2>/dev/null || true
-          cd -
+          rm -f squashfs-root/usr/lib/libEGL.so* squashfs-root/usr/lib/libEGL_mesa.so*
+          rm -f squashfs-root/usr/lib/libGL.so* squashfs-root/usr/lib/libGLX.so* squashfs-root/usr/lib/libGLX_mesa.so* squashfs-root/usr/lib/libGLdispatch.so*
+          rm -f squashfs-root/usr/lib/libwayland-client.so* squashfs-root/usr/lib/libwayland-egl.so* squashfs-root/usr/lib/libwayland-cursor.so*
+          rm -f squashfs-root/usr/lib/libdrm.so* squashfs-root/usr/lib/libgbm.so*
 
           # Repack AppImage using appimagetool
-          wget -q "https://github.com/AppImage/AppImageKit/releases/download/continuous/appimagetool-x86_64.AppImage" -O appimagetool
+          wget -q "https://github.com/AppImage/appimagetool/releases/download/continuous/appimagetool-x86_64.AppImage" -O appimagetool
           chmod +x appimagetool
 
           # Remove old AppImage and create new one
@@ -118,110 +115,53 @@ jobs:
           # Clean up
           rm -rf squashfs-root appimagetool
 
+          # The repacked file differs from the one tauri-action signed, so sign it again
+          rm -f "$APPIMAGE.sig"
+          npx tauri signer sign "$APPIMAGE"
+
           echo "AppImage post-processing complete: $APPIMAGE"
 
-      # Re-upload the fixed AppImage to GitHub Release
       - name: Upload fixed AppImage
         if: matrix.platform == 'ubuntu-latest'
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          # Find AppImage files
           APPIMAGE=$(find src-tauri/target/release/bundle/appimage -name "*.AppImage" -type f | head -1)
-          APPIMAGE_SIG="${APPIMAGE}.sig"
-
-          if [ -n "$APPIMAGE" ] && [ -f "$APPIMAGE" ]; then
-            # Get the tag name
-            TAG_NAME="${GITHUB_REF#refs/tags/}"
-
-            # Delete the old AppImage from release (uploaded by tauri-action)
-            APPIMAGE_NAME=$(basename "$APPIMAGE")
-            gh release delete-asset "$TAG_NAME" "$APPIMAGE_NAME" --yes 2>/dev/null || true
-
-            # Upload the fixed AppImage
-            gh release upload "$TAG_NAME" "$APPIMAGE" --clobber
-
-            # Re-sign and upload signature if signing keys are available
-            if [ -n "$TAURI_SIGNING_PRIVATE_KEY" ] && [ -f "$APPIMAGE_SIG" ]; then
-              gh release delete-asset "$TAG_NAME" "${APPIMAGE_NAME}.sig" --yes 2>/dev/null || true
-              gh release upload "$TAG_NAME" "$APPIMAGE_SIG" --clobber
-            fi
-
-            echo "Fixed AppImage uploaded successfully"
+          if [ -z "$APPIMAGE" ]; then
+            echo "No AppImage found, skipping upload"
+            exit 0
           fi
 
-  publish-aur:
+          TAG_NAME="${GITHUB_REF#refs/tags/}"
+          gh release upload "$TAG_NAME" "$APPIMAGE" "$APPIMAGE.sig" --clobber
+          echo "Fixed AppImage uploaded successfully"
+
+  # Runs after all builds so that no other job is rewriting latest.json at the same time
+  fix-updater-manifest:
     permissions:
-      contents: read
-    name: Publish to AUR (${{ matrix.repo }})
+      contents: write
+    name: Update AppImage signature in latest.json
     needs: build-tauri
     runs-on: ubuntu-latest
-    container:
-      image: archlinux:base-20251019.0.436919
-    strategy:
-      fail-fast: false
-      matrix:
-        repo: ["kerminal", "kerminal-bin"]
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Install Dependencies and Create User
-        run: |
-          # Initialize and update keyring first to avoid PGP signature trust errors
-          pacman-key --init
-          pacman-key --populate archlinux
-          pacman -Sy --noconfirm archlinux-keyring
-          pacman -Syu --noconfirm
-          pacman -S --noconfirm git openssh base-devel pacman-contrib sudo
-          useradd -m builder
-          echo "builder ALL=(ALL) NOPASSWD: ALL" >> /etc/sudoers
-
-      - name: Setup SSH
+      - name: Replace AppImage signature
         env:
-          AUR_SSH_PRIVATE_KEY: ${{ secrets.AUR_SSH_PRIVATE_KEY }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
         run: |
-          mkdir -p ~/.ssh
-          echo "$AUR_SSH_PRIVATE_KEY" > ~/.ssh/aur
-          chmod 600 ~/.ssh/aur
-          git config --global core.sshCommand "ssh -i ~/.ssh/aur -o StrictHostKeyChecking=no"
+          TAG_NAME="${GITHUB_REF#refs/tags/}"
+          mkdir assets && cd assets
+          gh release download "$TAG_NAME" --pattern "latest.json" --pattern "*.AppImage.sig"
 
-      - name: Configure Git
-        run: |
-          git config --global user.name "${{ github.actor }}"
-          git config --global user.email "${{ github.actor }}@users.noreply.github.com"
+          SIG_FILE=$(ls *.AppImage.sig | head -1)
+          APPIMAGE_NAME="${SIG_FILE%.sig}"
+          SIGNATURE=$(cat "$SIG_FILE")
 
-      - name: Clone AUR Repository
-        run: git clone ssh://aur@aur.archlinux.org/${{ matrix.repo }}.git /tmp/aur-repo
+          # Update every platform entry that points to the AppImage
+          jq --arg name "$APPIMAGE_NAME" --arg sig "$SIGNATURE" \
+            '.platforms |= with_entries(if (.value.url | endswith("/" + $name)) then .value.signature = $sig else . end)' \
+            latest.json > latest.fixed.json
+          mv latest.fixed.json latest.json
 
-      - name: Change Repo Ownership
-        run: chown -R builder:builder /tmp/aur-repo
-
-      - name: Update PKGBUILD as non-root user
-        run: |
-          sudo -u builder bash -c '
-            cd /tmp/aur-repo
-            VERSION=${{ github.ref_name }}
-            CLEAN_VERSION=${VERSION#v}
-            sed -i "s/^pkgver=.*/pkgver=$CLEAN_VERSION/" PKGBUILD
-            updpkgsums
-          '
-
-      - name: Update .SRCINFO as non-root user
-        run: |
-          sudo -u builder bash -c '
-            cd /tmp/aur-repo
-            makepkg --printsrcinfo > .SRCINFO
-          '
-
-      - name: Commit and Push to AUR
-        run: |
-          cd /tmp/aur-repo
-          git config --global --add safe.directory /tmp/aur-repo
-          if ! git diff-index --quiet HEAD; then
-            git add PKGBUILD .SRCINFO
-            git commit -m "Update to version ${{ github.ref_name }}"
-            git push
-          else
-            echo "No changes to commit."
-          fi
+          gh release upload "$TAG_NAME" latest.json --clobber
+          echo "latest.json updated for $APPIMAGE_NAME"

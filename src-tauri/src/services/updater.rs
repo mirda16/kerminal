@@ -94,7 +94,7 @@ impl<R: Runtime> UpdaterService<R> {
             .timeout(Duration::from_secs(10))
             .build()?;
 
-        let url = "https://github.com/klpod221/kerminal/releases/latest/download/latest.json";
+        let url = "https://github.com/mirda16/kerminal/releases/latest/download/latest.json";
 
         let res = client
             .get(url)
@@ -124,7 +124,7 @@ impl<R: Runtime> UpdaterService<R> {
                     available: true,
                     version: Some(format!("v{}", clean_latest)),
                     url: Some(format!(
-                        "https://github.com/klpod221/kerminal/releases/tag/v{}",
+                        "https://github.com/mirda16/kerminal/releases/tag/v{}",
                         clean_latest
                     )),
                 };

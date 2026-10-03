@@ -136,7 +136,7 @@ export async function checkLinuxUpdate(): Promise<{
 } | null> {
   try {
     const response = await fetch(
-      "https://api.github.com/repos/klpod221/kerminal/releases/latest",
+      "https://api.github.com/repos/mirda16/kerminal/releases/latest",
     );
     if (!response.ok) return null;
 

@@ -1,7 +1,7 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "Kerminal",
-  "version": "2.6.5",
+  "version": "2.6.6",
   "identifier": "com.klpod221.kerminal",
   "build": {
     "beforeDevCommand": "npm run dev",
@@ -22,14 +22,14 @@
         "default",
         "clipboard"
       ],
-      "csp": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' asset: https://asset.localhost blob: data:; font-src 'self'; connect-src 'self' https://github.com/klpod221/kerminal/releases/latest/download/latest.json"
+      "csp": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' asset: https://asset.localhost blob: data:; font-src 'self'; connect-src 'self' https://github.com/mirda16/kerminal/releases/latest/download/latest.json"
     }
   },
   "plugins": {
     "updater": {
-      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEEzRjRDNkU5NUU5MTY5QTkKUldTcGFaRmU2Y2IwbytSMi9kT0gzK3FxbnIvektEcE9ZOER2SUt1WkNWL1hKb0JiMUcwaWJQQ3oK",
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEQ1QTA5RTNDN0I0RjZENjAKUldSZ2JVOTdQSjZnMWVFYTZseW84MU53T1pIU0p6dkd6YWZYUWQ0RC9XMXFzOXpRdVc0MStqdEIK",
       "endpoints": [
-        "https://github.com/klpod221/kerminal/releases/latest/download/latest.json"
+        "https://github.com/mirda16/kerminal/releases/latest/download/latest.json"
       ],
       "windows": {
         "installMode": "passive"
