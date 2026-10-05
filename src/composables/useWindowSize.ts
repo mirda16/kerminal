@@ -1,5 +1,4 @@
 import { ref, computed, onMounted, onUnmounted } from "vue";
-import { getCurrentWindow } from "@tauri-apps/api/window";
 
 export const BREAKPOINTS = {
   mobile: 480,
@@ -17,12 +16,11 @@ export function useWindowSize() {
   const width = ref(0);
   const height = ref(0);
 
-  const updateSize = async () => {
-    const window = getCurrentWindow();
-    const size = await window.innerSize();
-
-    width.value = size.width;
-    height.value = size.height;
+  // CSS pixels, the same unit the breakpoints and layout use. The Tauri
+  // innerSize() is in physical pixels, which scales with the monitor DPI.
+  const updateSize = () => {
+    width.value = window.innerWidth;
+    height.value = window.innerHeight;
   };
 
   const isMobile = computed(() => width.value < BREAKPOINTS.mobile);

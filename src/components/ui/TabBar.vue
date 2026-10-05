@@ -1,5 +1,6 @@
 <template>
   <div
+    ref="tabBarRef"
     class="flex items-center border-b border-gray-800 relative bg-bg-primary sm:h-[30px] sm:min-h-[30px] sm:max-h-[30px]"
     :class="
       isMobile ? 'h-9 min-h-9 max-h-9' : 'h-[30px] min-h-[30px] max-h-[30px]'
@@ -257,7 +258,10 @@ const props = withDefaults(defineProps<TabBarProps>(), {
 });
 
 const emit = defineEmits<TabBarEmits>();
-const { width: windowWidth, isMobile } = useWindowSize();
+const { isMobile } = useWindowSize();
+
+const tabBarRef = ref<HTMLElement | null>(null);
+const tabBarWidth = ref(0);
 
 const tabsContainer = ref<HTMLElement | null>(null);
 const tabsContent = ref<HTMLElement | null>(null);
@@ -432,11 +436,14 @@ watch(
 let resizeObserver: ResizeObserver | null = null;
 
 onMounted(() => {
-  if (tabsContainer.value) {
-    resizeObserver = new ResizeObserver(() => {
-      updateScrollLimits();
-    });
-    resizeObserver.observe(tabsContainer.value);
+  // Also watch the tabs content: its width changes when tabs are added or
+  // resized without the container changing, which left scroll state stale.
+  resizeObserver = new ResizeObserver(() => {
+    tabBarWidth.value = tabBarRef.value?.clientWidth ?? 0;
+    updateScrollLimits();
+  });
+  for (const el of [tabBarRef.value, tabsContainer.value, tabsContent.value]) {
+    if (el) resizeObserver.observe(el);
   }
 
   nextTick(() => {
@@ -456,8 +463,9 @@ const tabMinWidth = computed(() => {
   const scrollButtonsWidth = showScrollButtons.value ? 64 : 0; // Scroll buttons
   const panelControlsWidth = 128; // Split + close buttons
   const padding = 16;
+  // Width of this panel's tab bar, not the window: split panels are narrower
   const availableWidth =
-    windowWidth.value -
+    tabBarWidth.value -
     addButtonWidth -
     scrollButtonsWidth -
     panelControlsWidth -

@@ -10,7 +10,7 @@
 
 <script setup lang="ts">
 import { ref, watch, nextTick, onMounted, onBeforeUnmount } from "vue";
-import { bytesToString, debounce } from "../../utils/helpers";
+import { debounce } from "../../utils/helpers";
 import type { TerminalInstance } from "../../types/panel";
 import { useWorkspaceStore } from "../../stores/workspace";
 import { TerminalRegistry, InputBatcher, FlowController } from "../../core";
@@ -28,6 +28,7 @@ import { writeText, readText } from "@tauri-apps/plugin-clipboard-manager";
 
 import { getTerminalTheme } from "../../utils/terminalTheme";
 import { loadWebGLRenderer } from "../../utils/terminalRenderer";
+import { onDevicePixelRatioChange } from "../../utils/devicePixelRatio";
 import { useSettingsStore } from "../../stores/settings";
 
 interface TerminalManagerProps {
@@ -55,7 +56,7 @@ const emit = defineEmits(["terminal-ready"]);
  * Create xterm instance for a terminal
  */
 const createTerminalInstance = async (
-  _terminalId: string,
+  terminalId: string,
   container: HTMLDivElement,
 ): Promise<{
   term: Terminal;
@@ -144,6 +145,20 @@ const createTerminalInstance = async (
       const selectedText = term.getSelection();
       await writeText(selectedText);
     }
+  });
+
+  // Keep the PTY size in sync with every fit (font change, focus, DPI change...).
+  // Otherwise the shell wraps lines at a different width and output overlaps.
+  // Looked up in the store because this terminal can outlive this panel.
+  term.onResize(({ cols, rows }) => {
+    const backendTerminalId = workspaceStore.terminals.find(
+      (t) => t.id === terminalId,
+    )?.backendTerminalId;
+    if (!backendTerminalId) return;
+
+    workspaceStore
+      .resizeTerminal({ terminalId: backendTerminalId, cols, rows })
+      .catch((error) => console.error("Failed to resize terminal:", error));
   });
 
   // Initialize FlowController
@@ -369,12 +384,14 @@ onMounted(async () => {
         if (!matchingTerminal) return;
 
         const managed = TerminalRegistry.getTerminal(matchingTerminal.id);
+        // Pass raw bytes: chunks can end mid UTF-8 sequence, and xterm's
+        // decoder keeps that state between writes. Decoding each chunk on
+        // its own would turn split characters into U+FFFD and shift the cursor.
+        const output = new Uint8Array(terminalData.data);
         if (managed?.flowController) {
-          const output = bytesToString(terminalData.data);
           managed.flowController.write(output);
         } else if (managed?.term) {
           // Fallback if no flow controller (shouldn't happen with new logic)
-          const output = bytesToString(terminalData.data);
           managed.term.write(output);
         }
       },
@@ -387,6 +404,7 @@ onMounted(async () => {
 
     window.addEventListener("focus", handleWindowFocus);
     window.addEventListener("resize", handleResize);
+    const stopDprWatch = onDevicePixelRatioChange(handleResize);
 
     // Update unlisten to include cleanup
     const originalUnlisten = outputUnlisten;
@@ -394,6 +412,7 @@ onMounted(async () => {
       if (originalUnlisten) originalUnlisten();
       window.removeEventListener("focus", handleWindowFocus);
       window.removeEventListener("resize", handleResize);
+      stopDprWatch();
     };
 
     // Mount initial terminal if any

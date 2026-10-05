@@ -174,6 +174,7 @@ import Button from "./Button.vue";
 import HistorySearchModal from "../history/HistorySearchModal.vue";
 import { getTerminalTheme } from "../../utils/terminalTheme";
 import { loadWebGLRenderer } from "../../utils/terminalRenderer";
+import { onDevicePixelRatioChange } from "../../utils/devicePixelRatio";
 import { useSettingsStore } from "../../stores/settings";
 import { useOverlayStore } from "../../stores/overlay";
 import type { PanelLayout, Tab } from "../../types/panel";
@@ -213,6 +214,7 @@ const terminalRef = ref<HTMLElement | null>(null);
 let term: Terminal;
 let fitAddon: FitAddon;
 let flowController: FlowController;
+let stopDprWatch: (() => void) | null = null;
 
 const workspaceStore = useWorkspaceStore();
 const settingsStore = useSettingsStore();
@@ -720,6 +722,7 @@ onMounted(async () => {
   emit("terminal-ready", props.terminalId || "default");
 
   window.addEventListener("resize", handleResize);
+  stopDprWatch = onDevicePixelRatioChange(handleResize);
 
   handleResize();
 
@@ -738,6 +741,7 @@ onBeforeUnmount(async () => {
   document.removeEventListener("visibilitychange", handleVisibilityChange);
   window.removeEventListener("focus", handleWindowFocus);
   window.removeEventListener("resize", handleResize);
+  stopDprWatch?.();
 
   if (props.backendTerminalId) {
     try {
