@@ -117,7 +117,8 @@ jobs:
 
           # The repacked file differs from the one tauri-action signed, so sign it again
           rm -f "$APPIMAGE.sig"
-          npx tauri signer sign "$APPIMAGE"
+          # Tauri CLI 2.9 `signer sign` does not read TAURI_SIGNING_PRIVATE_KEY, pass it explicitly
+          npx tauri signer sign -k "$TAURI_SIGNING_PRIVATE_KEY" -p "$TAURI_SIGNING_PRIVATE_KEY_PASSWORD" "$APPIMAGE"
 
           echo "AppImage post-processing complete: $APPIMAGE"
 
