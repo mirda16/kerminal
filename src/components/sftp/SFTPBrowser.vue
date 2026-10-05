@@ -185,21 +185,18 @@
       </Splitpanes>
     </div>
 
-    <!-- Modals -->
-    <TransferManager v-if="isOverlayVisible('sftp-transfer-manager-modal')" />
-    <FileRenameModal v-if="isOverlayVisible('sftp-file-rename-modal')" />
-    <FileDeleteModal v-if="isOverlayVisible('sftp-file-delete-modal')" />
-    <FilePermissionsModal
-      v-if="isOverlayVisible('sftp-file-permissions-modal')"
-    />
-    <CreateDirectoryModal
-      v-if="isOverlayVisible('sftp-create-directory-modal')"
-    />
-    <CreateFileModal v-if="isOverlayVisible('sftp-create-file-modal')" />
-    <SyncCompareModal v-if="isOverlayVisible('sftp-sync-compare-modal')" />
-    <FileEditorModal v-if="isOverlayVisible('sftp-file-editor-modal')" />
-    <FilePreviewModal v-if="isOverlayVisible('sftp-file-preview-modal')" />
-    <FileSearchModal v-if="isOverlayVisible('sftp-file-search-modal')" />
+    <!-- Modals: always mounted, each Modal registers its overlay on mount and
+         openOverlay() ignores unregistered ids. Still lazy-loaded chunks. -->
+    <TransferManager />
+    <FileRenameModal />
+    <FileDeleteModal />
+    <FilePermissionsModal />
+    <CreateDirectoryModal />
+    <CreateFileModal />
+    <SyncCompareModal />
+    <FileEditorModal />
+    <FilePreviewModal />
+    <FileSearchModal />
   </div>
 </template>
 
@@ -543,61 +540,45 @@ async function handleLocalUpload(files: FileList | File[]) {
 
   const remotePath = sftpStore.browserState.remotePath || "/";
   const fileArray = Array.from(files);
-  const tempFilesToCleanup: string[] = [];
 
-  try {
-    for (const file of fileArray) {
-      let filePath = "";
-      const fileWithPath = file as File & { path?: string };
+  for (const file of fileArray) {
+    let filePath = "";
+    let isTempFile = false;
+    const fileWithPath = file as File & { path?: string };
 
-      if (fileWithPath.path && !fileWithPath.path.includes("/")) {
-        // File has a direct path (not from directory structure)
-        filePath = fileWithPath.path;
-      } else if (file instanceof File) {
-        const tempDirPath = await tempDir();
-        const tempFilePath = await join(
-          tempDirPath,
-          `sftp_upload_${Date.now()}_${file.name}`,
-        );
-
-        const arrayBuffer = await file.arrayBuffer();
-        const uint8Array = new Uint8Array(arrayBuffer);
-
-        await writeFile(tempFilePath, uint8Array);
-
-        filePath = tempFilePath;
-        tempFilesToCleanup.push(tempFilePath);
-      } else {
-        continue;
-      }
-
-      const normalizedRemotePath = remotePath.endsWith("/")
-        ? remotePath.slice(0, -1)
-        : remotePath;
-      const remoteFilePath = `${normalizedRemotePath}/${file.name}`;
-
-      await sftpStore.uploadFile(
-        sftpStore.activeSessionId,
-        filePath,
-        remoteFilePath,
+    if (fileWithPath.path && !fileWithPath.path.includes("/")) {
+      // File has a direct path (not from directory structure)
+      filePath = fileWithPath.path;
+    } else if (file instanceof File) {
+      const tempDirPath = await tempDir();
+      const tempFilePath = await join(
+        tempDirPath,
+        `sftp_upload_${Date.now()}_${file.name}`,
       );
-      message.success(`Uploading ${file.name}...`);
+
+      const arrayBuffer = await file.arrayBuffer();
+      const uint8Array = new Uint8Array(arrayBuffer);
+
+      await writeFile(tempFilePath, uint8Array);
+
+      filePath = tempFilePath;
+      isTempFile = true;
+    } else {
+      continue;
     }
 
-    await sftpStore.listRemoteDirectory(sftpStore.activeSessionId, remotePath);
-  } finally {
-    if (tempFilesToCleanup.length > 0) {
-      setTimeout(async () => {
-        for (const tempPath of tempFilesToCleanup) {
-          try {
-            await remove(tempPath);
-          } catch (error) {
-            console.warn("Failed to cleanup temp file:", tempPath, error);
-          }
-        }
-      }, 5000);
-    }
+    const normalizedRemotePath = remotePath.endsWith("/")
+      ? remotePath.slice(0, -1)
+      : remotePath;
+    const remoteFilePath = `${normalizedRemotePath}/${file.name}`;
+
+    // Temp copies are deleted by the store once the queued transfer ends
+    const upload = isTempFile ? sftpStore.uploadTempFile : sftpStore.uploadFile;
+    await upload(sftpStore.activeSessionId, filePath, remoteFilePath);
+    message.success(`Uploading ${file.name}...`);
   }
+
+  await sftpStore.listRemoteDirectory(sftpStore.activeSessionId, remotePath);
 }
 
 async function handleLocalOpen(file: FileEntry) {
@@ -1275,21 +1256,7 @@ async function handleCreateFileSubmit(event: Event) {
           ? `/${customEvent.detail.name}`
           : `${customEvent.detail.path}/${customEvent.detail.name}`;
 
-      const tempDirPath = await tempDir();
-      const tempFilePath = await join(
-        tempDirPath,
-        `sftp_temp_${Date.now()}_${customEvent.detail.name}`,
-      );
-
-      await writeFile(tempFilePath, new Uint8Array());
-
-      await sftpStore.uploadFile(
-        sftpStore.activeSessionId,
-        tempFilePath,
-        filePath,
-      );
-
-      await remove(tempFilePath).catch(() => {});
+      await sftpStore.writeFile(sftpStore.activeSessionId, filePath, "");
 
       await sftpStore.listRemoteDirectory(
         sftpStore.activeSessionId,

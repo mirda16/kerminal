@@ -25,11 +25,12 @@ import type {
   SyncOperation,
   DiffEntry,
   SearchResult,
+  TransferProgress,
 } from "../types/sftp";
 import * as sftpService from "../services/sftp";
 import { api } from "../services/api";
 import { useSSHStore } from "./ssh";
-import { readDir, stat } from "@tauri-apps/plugin-fs";
+import { readDir, stat, remove } from "@tauri-apps/plugin-fs";
 import {
   withRetry,
   handleError,
@@ -799,6 +800,86 @@ export const useSFTPStore = defineStore("sftp", () => {
 
   let unsubscribeTransferRealtime: (() => void) | null = null;
 
+  /** Pending listing refreshes after finished transfers, coalesced per pane */
+  const refreshTimers: Partial<
+    Record<"local" | "remote", ReturnType<typeof setTimeout>>
+  > = {};
+
+  const parentDir = (path: string): string => {
+    const trimmed = path.replace(/[\\/]+$/, "");
+    const index = Math.max(trimmed.lastIndexOf("/"), trimmed.lastIndexOf("\\"));
+    if (index < 0) return trimmed;
+    return index === 0 ? trimmed[0] : trimmed.slice(0, index);
+  };
+
+  const samePath = (a: string, b: string): boolean =>
+    a.replace(/[\\/]+$/, "") === b.replace(/[\\/]+$/, "");
+
+  /**
+   * Refresh the pane showing the destination of a finished transfer.
+   * Uploads are queued, so refreshing right after queueing missed the file.
+   */
+  function refreshAfterTransfer(progress: TransferProgress): void {
+    if (progress.status !== "completed") return;
+
+    const isUpload = progress.direction === "upload";
+    const pane = isUpload ? "remote" : "local";
+    const shownPath = isUpload
+      ? browserState.value.remotePath
+      : browserState.value.localPath;
+    const destination = isUpload ? progress.remotePath : progress.localPath;
+    if (!shownPath || !samePath(parentDir(destination), shownPath)) return;
+
+    clearTimeout(refreshTimers[pane]);
+    refreshTimers[pane] = setTimeout(() => {
+      delete refreshTimers[pane];
+      const sessionId = browserState.value.activeSessionId;
+      const refresh = isUpload
+        ? sessionId && listRemoteDirectory(sessionId, shownPath)
+        : listLocalDirectory(shownPath);
+      if (refresh) refresh.catch(() => {});
+    }, 300);
+  }
+
+  /** Temporary local copies being uploaded, keyed by transfer ID */
+  const tempUploads = new Map<string, string>();
+
+  async function releaseTempUpload(transferId: string): Promise<void> {
+    const tempPath = tempUploads.get(transferId);
+    if (!tempPath) return;
+    tempUploads.delete(transferId);
+    await remove(tempPath).catch((error) =>
+      console.warn("Failed to cleanup temp file:", tempPath, error),
+    );
+  }
+
+  /**
+   * Upload a temporary local file and delete it once the transfer ends.
+   * Uploads are only queued here, so the file must outlive this call.
+   * It is kept after a final failure so a manual retry still works.
+   */
+  async function uploadTempFile(
+    sessionId: string,
+    tempPath: string,
+    remotePath: string,
+  ): Promise<string> {
+    const transferId = await uploadFile(sessionId, tempPath, remotePath);
+    tempUploads.set(transferId, tempPath);
+
+    // A small file may have finished before we got its ID
+    const progress = await sftpService
+      .getSFTPTransferProgress(transferId)
+      .catch(() => null);
+    if (
+      progress?.status === "completed" ||
+      progress?.status === "cancelled"
+    ) {
+      await releaseTempUpload(transferId);
+    }
+
+    return transferId;
+  }
+
   /**
    * Start listening to realtime events
    */
@@ -847,11 +928,14 @@ export const useSFTPStore = defineStore("sftp", () => {
       const u2 = await api.listen<{ transferId: string }>(
         "sftp_transfer_complete",
         async (data) => {
+          // Also emitted on cancel
+          await releaseTempUpload(data.transferId);
           try {
             const progress = await sftpService.getSFTPTransferProgress(
               data.transferId,
             );
             browserState.value.activeTransfers.set(data.transferId, progress);
+            refreshAfterTransfer(progress);
           } catch (error) {
             const errorMessage = handleError(error, {
               operation: "Get Transfer Progress (Complete)",
@@ -968,6 +1052,7 @@ export const useSFTPStore = defineStore("sftp", () => {
     listRemoteDirectory,
     uploadFile,
     downloadFile,
+    uploadTempFile,
     cancelTransfer,
     compareDirectories,
     syncDirectories,

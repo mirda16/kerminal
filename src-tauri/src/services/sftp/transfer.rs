@@ -438,6 +438,11 @@ impl TransferManager {
             (file, 0, 0)
         };
 
+        // The opened file keeps its own handle to the SFTP session, so release the
+        // session lock now. Holding it for the whole transfer blocked directory
+        // listing and other transfers on the same server until this one finished.
+        drop(data);
+
         // Seek local file to actual resume position
         if actual_local_seek > 0 {
             use tokio::io::AsyncSeekExt;
@@ -648,6 +653,11 @@ impl TransferManager {
             .map_err(|e| SFTPError::Other {
                 message: format!("Failed to open remote file: {}", e),
             })?;
+
+        // The opened file keeps its own handle to the SFTP session, so release the
+        // session lock now. Holding it for the whole transfer blocked directory
+        // listing and other transfers on the same server until this one finished.
+        drop(data);
 
         // Skip bytes to resume position if resuming
         // For SFTP, we need to read and discard bytes until we reach the position
