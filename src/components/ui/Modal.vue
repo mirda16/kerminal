@@ -31,19 +31,19 @@
         :class="isMobile ? 'top-[30px]' : 'top-[30px]'"
       >
         <div
-          class="relative bg-bg-tertiary border border-gray-700 shadow-2xl overflow-hidden pointer-events-auto"
+          class="relative flex flex-col bg-bg-tertiary border border-gray-700 shadow-2xl overflow-hidden pointer-events-auto"
           :class="[
             sizeClass,
             isMobile
               ? 'w-full h-full rounded-none'
-              : 'w-full mx-4 max-h-[90vh] rounded-lg',
+              : 'w-full mx-4 max-h-[90%] rounded-lg',
           ]"
           @click.stop
         >
           <!-- Header -->
           <div
             v-if="title || $slots.header || showCloseButton"
-            class="flex items-center justify-between border-b border-gray-700"
+            class="flex shrink-0 items-center justify-between border-b border-gray-700"
             :class="isMobile ? 'p-3' : 'p-4'"
           >
             <div class="flex items-center space-x-3">
@@ -84,12 +84,10 @@
             />
           </div>
 
-          <!-- Content -->
+          <!-- Content: shrinks to the card height (no vh units, see App.vue) -->
           <div
-            class="overflow-y-auto"
-            :class="[
-              isMobile ? 'p-3 max-h-[calc(100vh-9rem)]' : 'p-4 max-h-[75vh]',
-            ]"
+            class="min-h-0 overflow-y-auto"
+            :class="isMobile ? 'p-3' : 'p-4'"
           >
             <slot />
           </div>
@@ -97,7 +95,7 @@
           <!-- Footer -->
           <div
             v-if="$slots.footer"
-            class="flex justify-end space-x-3 border-t border-gray-700 bg-bg-secondary"
+            class="flex shrink-0 justify-end space-x-3 border-t border-gray-700 bg-bg-secondary"
             :class="isMobile ? 'p-3' : 'p-4'"
           >
             <slot name="footer" />

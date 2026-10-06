@@ -17,7 +17,9 @@
 -->
 
 <template>
-  <div class="h-screen w-screen flex flex-col bg-bg-primary overflow-hidden">
+  <!-- fixed inset-0 instead of w-screen/h-screen: WebView2 keeps vw/vh at the
+       old scale after the window moves to a monitor with different scaling -->
+  <div class="fixed inset-0 flex flex-col bg-bg-primary overflow-hidden">
     <!-- Global Terminal Host for DOM teleportation -->
     <TerminalHost />
     <ScaleDebugOverlay />
