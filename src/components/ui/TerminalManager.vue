@@ -328,6 +328,38 @@ watch(
   { deep: true },
 );
 
+// Send the current size once a terminal has a backend, and again when an SSH
+// session finishes connecting. The backend starts at 80x24 and xterm only
+// reports size changes, so without this a remote shell kept wrapping at 80
+// columns until the window was resized, which garbled line editing.
+const syncedBackendState = new Map<string, string>();
+watch(
+  () =>
+    props.terminals.map((t) => ({
+      id: t.id,
+      backendTerminalId: t.backendTerminalId,
+      key: `${t.backendTerminalId ?? ""}:${t.isConnected ? 1 : 0}`,
+    })),
+  (states) => {
+    for (const { id, backendTerminalId, key } of states) {
+      if (!backendTerminalId || syncedBackendState.get(id) === key) continue;
+
+      // Not created yet: mounting fits and sends the size later
+      const term = TerminalRegistry.getTerminal(id)?.term;
+      if (!term) continue;
+      syncedBackendState.set(id, key);
+      workspaceStore
+        .resizeTerminal({
+          terminalId: backendTerminalId,
+          cols: term.cols,
+          rows: term.rows,
+        })
+        .catch((error) => console.error("Failed to sync terminal size:", error));
+    }
+  },
+  { immediate: true },
+);
+
 // Watch for settings changes
 watch(
   () => settingsStore.terminalTheme,
