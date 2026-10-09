@@ -38,7 +38,7 @@
             class="w-full flex items-center justify-between px-3 py-2 rounded-md text-left transition-colors group"
             :class="[
               selectedIndex === index
-                ? 'bg-blue-600 text-white'
+                ? 'bg-blue-600 text-on-accent'
                 : 'text-gray-300 hover:bg-gray-800'
             ]"
             @click="executeCommand(command)"

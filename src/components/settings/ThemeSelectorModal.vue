@@ -31,6 +31,16 @@
     </div>
 
     <Card custom-class="mb-2">
+      <Select
+        id="ui-theme"
+        v-model="uiTheme"
+        label="App appearance"
+        :options="uiThemeOptions"
+        helper-text="Colors of the application UI. The terminal keeps the theme selected below."
+      />
+    </Card>
+
+    <Card custom-class="mb-2">
       <Checkbox
         id="use-webgl-renderer"
         v-model="useWebGLRenderer"
@@ -225,6 +235,8 @@ import Modal from "../ui/Modal.vue";
 import Button from "../ui/Button.vue";
 import Card from "../ui/Card.vue";
 import Checkbox from "../ui/Checkbox.vue";
+import Select from "../ui/Select.vue";
+import type { UiTheme } from "../../utils/uiTheme";
 import { useSettingsStore } from "../../stores/settings";
 import { getTerminalTheme } from "../../utils/terminalTheme";
 import { useOverlay } from "../../composables/useOverlay";
@@ -240,6 +252,19 @@ const customThemesList = computed(() => {
 
 const builtInThemesList = computed(() => {
   return settingsStore.builtInThemes;
+});
+
+const uiThemeOptions = [
+  { value: "dark", label: "Dark" },
+  { value: "light", label: "Light" },
+  { value: "system", label: "Follow system" },
+];
+
+const uiTheme = computed({
+  get: () => settingsStore.uiTheme,
+  set: (theme: string | number) => {
+    settingsStore.setUiTheme(theme as UiTheme);
+  },
 });
 
 const useWebGLRenderer = computed({

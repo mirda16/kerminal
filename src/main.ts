@@ -20,6 +20,10 @@ import { createApp } from "vue";
 import { createPinia } from "pinia";
 import "./assets/css/main.css";
 import App from "./App.vue";
+import { applyUiTheme, getCachedUiTheme } from "./utils/uiTheme";
+
+// Apply the light/dark UI theme before the first render
+applyUiTheme(getCachedUiTheme());
 
 // Configure Monaco Editor Workers
 import editorWorker from "monaco-editor/esm/vs/editor/editor.worker?worker";

@@ -19,6 +19,41 @@
 
   /* Border colors */
   --color-border-dark: #1f1f1f;
+
+  /* Text on colored (accent) backgrounds, stays white in the light theme */
+  --color-on-accent: #fff;
+}
+
+/*
+ * Light UI theme. Components use the neutral gray scale and text-white
+ * directly, so the light theme inverts that scale instead of restyling
+ * every component. Colored accents (blue, red, ...) are left as they are.
+ */
+:root[data-ui-theme="light"] {
+  color-scheme: light;
+
+  --color-bg-primary: #f3f4f6;
+  --color-bg-secondary: #ffffff;
+  --color-bg-tertiary: #fafafa;
+  --color-bg-quaternary: #e9eaec;
+  --color-border-dark: #e5e7eb;
+
+  --color-scrollbar-thumb: #b4b8bf;
+  --color-scrollbar-thumb-hover: #8b9099;
+  --color-scrollbar-thumb-mobile: #9ca0a8;
+
+  --color-white: oklch(21% 0.034 264.665);
+  --color-gray-50: oklch(13% 0.028 261.692);
+  --color-gray-100: oklch(21% 0.034 264.665);
+  --color-gray-200: oklch(27.8% 0.033 256.848);
+  --color-gray-300: oklch(37.3% 0.034 259.733);
+  --color-gray-400: oklch(44.6% 0.03 256.802);
+  --color-gray-500: oklch(55.1% 0.027 264.364);
+  --color-gray-600: oklch(70.7% 0.022 261.325);
+  --color-gray-700: oklch(87.2% 0.01 258.338);
+  --color-gray-800: oklch(92.8% 0.006 264.531);
+  --color-gray-900: oklch(96.7% 0.003 264.542);
+  --color-gray-950: oklch(98.5% 0.002 247.839);
 }
 
 html,

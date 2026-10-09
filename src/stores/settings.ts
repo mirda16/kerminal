@@ -23,6 +23,11 @@ import { Store } from "@tauri-apps/plugin-store";
 import { api } from "../services/api";
 import * as settingsService from "../services/settings";
 import { getSystemInfo as getSystemInfoService } from "../services/dashboard";
+import {
+  applyUiTheme,
+  getCachedUiTheme,
+  type UiTheme,
+} from "../utils/uiTheme";
 import type { TerminalTheme } from "../utils/terminalTheme";
 import { handleError, type ErrorContext } from "../utils/errorHandler";
 import { message } from "../utils/message";
@@ -78,6 +83,9 @@ export const useSettingsStore = defineStore("settings", () => {
   const fontSize = ref<number>(13);
   const useWebGLRenderer = ref<boolean>(getDefaultUseWebGLRenderer());
 
+  // Application (UI) appearance, separate from the terminal theme
+  const uiTheme = ref<UiTheme>(getCachedUiTheme());
+
   // Available built-in themes
   const builtInThemes = getAvailableThemes();
 
@@ -125,6 +133,16 @@ export const useSettingsStore = defineStore("settings", () => {
       if (typeof savedUseWebGLRenderer === "boolean") {
         useWebGLRenderer.value = savedUseWebGLRenderer;
       }
+
+      const savedUiTheme = await storeInstance.get<UiTheme>("ui-theme");
+      if (
+        savedUiTheme === "dark" ||
+        savedUiTheme === "light" ||
+        savedUiTheme === "system"
+      ) {
+        uiTheme.value = savedUiTheme;
+        applyUiTheme(savedUiTheme);
+      }
     } catch (error) {
       const errorMessage = handleError(error, context);
       message.error(errorMessage);
@@ -147,6 +165,7 @@ export const useSettingsStore = defineStore("settings", () => {
       await storeInstance.set("font-family", fontFamily.value);
       await storeInstance.set("font-size", fontSize.value);
       await storeInstance.set("use-webgl-renderer", useWebGLRenderer.value);
+      await storeInstance.set("ui-theme", uiTheme.value);
       await storeInstance.save();
     } catch (error) {
       const errorMessage = handleError(error, context);
@@ -237,6 +256,12 @@ export const useSettingsStore = defineStore("settings", () => {
     await saveSettings();
   };
 
+  const setUiTheme = async (theme: UiTheme) => {
+    uiTheme.value = theme;
+    applyUiTheme(theme);
+    await saveSettings();
+  };
+
   const upsertCustomTheme = (theme: CustomTheme) => {
     if (!theme?.id) return;
     const i = customThemes.value.findIndex((t) => t.id === theme.id);
@@ -322,11 +347,13 @@ export const useSettingsStore = defineStore("settings", () => {
     fontFamily,
     fontSize,
     useWebGLRenderer,
+    uiTheme,
     isLoading,
     setTerminalTheme,
     setFontFamily,
     setFontSize,
     setUseWebGLRenderer,
+    setUiTheme,
     loadSettings,
     createCustomTheme,
     updateCustomTheme,
