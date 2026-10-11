@@ -1,20 +1,5 @@
-/*
- * Kerminal - Modern Terminal Emulator & SSH Manager
- * Copyright (C) 2026 Bùi Thanh Xuân (klpod221)
- *
- * This program is free software: you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation, either version 3 of the License, or
- * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program.  If not, see <https://www.gnu.org/licenses/>.
- */
+// Copyright (C) 2026 Bùi Thanh Xuân (klpod221)
+// SPDX-License-Identifier: GPL-3.0-or-later
 
 use crate::core::terminal::{TerminalFactory, TerminalWrapper};
 use crate::database::service::DatabaseService;
@@ -41,6 +26,7 @@ pub struct TerminalManager {
     ssh_key_service: Option<Arc<Mutex<SSHKeyService>>>,
     pub recorders: Arc<RwLock<HashMap<String, Arc<SessionRecorder>>>>,
     titles: Arc<RwLock<HashMap<String, String>>>,
+    output_buffers: Arc<RwLock<HashMap<String, Arc<crate::utils::output_buffer::TerminalOutputBuffer>>>>,
 }
 
 impl TerminalManager {
@@ -59,6 +45,7 @@ impl TerminalManager {
             ssh_key_service: Some(ssh_key_service),
             recorders: Arc::new(RwLock::new(HashMap::new())),
             titles: Arc::new(RwLock::new(HashMap::new())),
+            output_buffers: Arc::new(RwLock::new(HashMap::new())),
         }
     }
 
@@ -110,6 +97,7 @@ impl TerminalManager {
             terminal_id.clone(),
             config.clone(),
             Some(self.database_service.clone()),
+            app_handle.clone(),
         )
         .await?;
 
@@ -181,18 +169,24 @@ impl TerminalManager {
                 let _ = handle.emit("ssh-connected", &success_event);
             }
         }
-        let (tx, mut rx) = mpsc::unbounded_channel::<Vec<u8>>();
         let (title_tx, mut title_rx) = mpsc::unbounded_channel::<String>();
         let (exit_tx, mut exit_rx) = mpsc::unbounded_channel::<TerminalExited>();
         let (latency_tx, mut latency_rx) = mpsc::unbounded_channel::<TerminalLatency>();
 
+        let buffer = crate::utils::output_buffer::TerminalOutputBuffer::new(1024 * 1024); // 1MB
+
         {
-            let mut senders = self.output_senders.write().await;
-            senders.insert(terminal_id.clone(), tx.clone());
+            let mut buffers = self.output_buffers.write().await;
+            buffers.insert(terminal_id.clone(), buffer.clone());
         }
 
         terminal
-            .start_read_loop(tx, Some(title_tx), Some(exit_tx), Some(latency_tx))
+            .start_read_loop(
+                buffer.clone(),
+                Some(title_tx),
+                Some(exit_tx),
+                Some(latency_tx),
+            )
             .await?;
 
         let terminal_id_clone = terminal_id.clone();
@@ -201,16 +195,38 @@ impl TerminalManager {
         let recorders_clone = self.recorders.clone();
 
         tokio::spawn(async move {
-            while let Some(data) = rx.recv().await {
-                let terminal_data = TerminalData {
-                    terminal_id: terminal_id_clone.clone(),
-                    data: data.clone(),
-                };
+            let mut decoder = crate::utils::utf8::IncrementalUtf8Decoder::new();
+            loop {
+                let (data, dropped_count) = buffer.pop_all().await;
+                if data.is_empty() {
+                    break; // EOF
+                }
+
+                if dropped_count > 0 {
+                    // Send a warning to frontend if bytes were dropped
+                    let warning_data = TerminalData {
+                        terminal_id: terminal_id_clone.clone(),
+                        data: format!("\r\n\x1b[31m[Kerminal Warning: output too fast, dropped {} bytes]\x1b[0m\r\n", dropped_count),
+                    };
+                    if let Some(handle) = &app_handle_clone {
+                        let _ = handle.emit("terminal-output", &warning_data);
+                    }
+                }
 
                 // Record output if recording is active (always record raw output)
                 if let Some(recorder) = recorders_clone.read().await.get(&terminal_id_clone) {
                     let _ = recorder.record_output(&data).await;
                 }
+
+                let decoded = decoder.decode(&data);
+                if decoded.is_empty() {
+                    continue;
+                }
+
+                let terminal_data = TerminalData {
+                    terminal_id: terminal_id_clone.clone(),
+                    data: decoded,
+                };
 
                 if let Some(handle) = &app_handle_clone {
                     let _ = handle.emit("terminal-output", &terminal_data);
@@ -326,6 +342,11 @@ impl TerminalManager {
         }
 
         {
+            let mut buffers = self.output_buffers.write().await;
+            buffers.remove(&terminal_id);
+        }
+
+        {
             let mut titles = self.titles.write().await;
             titles.remove(&terminal_id);
         }
@@ -377,5 +398,14 @@ impl TerminalManager {
         }
 
         Ok(terminal_infos)
+    }
+
+    pub async fn get_terminal_metrics(&self, terminal_id: String) -> Result<crate::utils::output_buffer::TerminalMetrics, AppError> {
+        let buffers = self.output_buffers.read().await;
+        if let Some(buffer) = buffers.get(&terminal_id) {
+            Ok(buffer.get_metrics())
+        } else {
+            Err(AppError::TerminalNotFound(terminal_id))
+        }
     }
 }

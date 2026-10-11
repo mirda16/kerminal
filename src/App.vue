@@ -1,4 +1,9 @@
 <!--
+  - Copyright (C) 2026 Bùi Thanh Xuân (klpod221)
+  - SPDX-License-Identifier: GPL-3.0-or-later
+-->
+
+<!--
  * Kerminal - Modern Terminal Emulator & SSH Manager
  * Copyright (C) 2026 Bùi Thanh Xuân (klpod221)
  *
@@ -17,11 +22,13 @@
 -->
 
 <template>
-  <!-- fixed inset-0 instead of w-screen/h-screen: WebView2 keeps vw/vh at the
-       old scale after the window moves to a monitor with different scaling -->
+  <!-- fixed inset-0 instead of w-screen/h-screen: main.css zooms html by 1.2
+       on HiDPI screens, and 100vw/100vh inside the zoomed page overflowed the
+       window (UI cut off on the right after moving to a 150 % monitor) -->
   <div class="fixed inset-0 flex flex-col bg-bg-primary overflow-hidden">
     <!-- Global Terminal Host for DOM teleportation -->
     <TerminalHost />
+    <DangerousCommandModal />
     <div
       v-if="useLegacyRenderer"
       class="fixed bottom-4 right-4 z-9999 font-mono text-green-500 text-opacity-80 text-sm select-none pointer-events-none"
@@ -70,6 +77,7 @@ import { message } from "./utils/message";
 
 import TopBar from "./components/TopBar.vue";
 import TerminalHost from "./components/ui/TerminalHost.vue";
+import DangerousCommandModal from "./components/security/DangerousCommandModal.vue";
 
 const Dashboard = defineAsyncComponent(
   () => import("./components/Dashboard.vue"),

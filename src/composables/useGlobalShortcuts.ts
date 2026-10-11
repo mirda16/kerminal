@@ -1,9 +1,13 @@
+// Copyright (C) 2026 Bùi Thanh Xuân (klpod221)
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 import { onMounted, onBeforeUnmount, watch } from "vue";
 import { useKeyboardShortcutsStore } from "../stores/keyboardShortcuts";
 import { ShortcutAction, ActiveShortcut } from "../types/shortcuts";
 import { useWorkspaceStore } from "../stores/workspace";
 import { useViewStateStore } from "../stores/viewState";
 import { useTourStore } from "../stores/tour";
+import { useBroadcastStore } from "../stores/broadcast";
 import { useOverlay } from "./useOverlay";
 
 // Singleton flag to ensure only one listener is registered
@@ -168,6 +172,10 @@ export function useGlobalShortcuts() {
           workspaceStore.selectTab(activePanel.id, activePanel.tabs[nextIndex].id);
         }
       }
+    },
+    [ShortcutAction.ToggleBroadcast]: () => {
+      const broadcastStore = useBroadcastStore();
+      broadcastStore.toggleBroadcast();
     },
     [ShortcutAction.SwitchToTab1]: () => switchToTabIndex(0),
     [ShortcutAction.SwitchToTab2]: () => switchToTabIndex(1),

@@ -1,3 +1,6 @@
+// Copyright (C) 2026 Bùi Thanh Xuân (klpod221)
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 use serde::{Deserialize, Serialize};
 
 /// Transfer progress information
@@ -68,6 +71,7 @@ pub enum TransferDirection {
 
 impl TransferProgress {
     /// Check if transfer is active (queued or in progress)
+    #[allow(dead_code)]
     pub fn is_active(&self) -> bool {
         matches!(
             self.status,

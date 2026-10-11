@@ -1,20 +1,5 @@
-/*
- * Kerminal - Modern Terminal Emulator & SSH Manager
- * Copyright (C) 2026 Bùi Thanh Xuân (klpod221)
- *
- * This program is free software: you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation, either version 3 of the License, or
- * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program.  If not, see <https://www.gnu.org/licenses/>.
- */
+// Copyright (C) 2026 Bùi Thanh Xuân (klpod221)
+// SPDX-License-Identifier: GPL-3.0-or-later
 
 use anyhow::Result;
 use async_trait::async_trait;
@@ -51,7 +36,11 @@ struct TunnelHandle {
 
 /// SSH Client Handler for russh
 #[derive(Clone)]
-pub struct SSHClientHandler;
+pub struct SSHClientHandler {
+    host: String,
+    port: u16,
+    known_hosts_path: std::path::PathBuf,
+}
 
 #[async_trait]
 impl russh::client::Handler for SSHClientHandler {
@@ -59,9 +48,16 @@ impl russh::client::Handler for SSHClientHandler {
 
     async fn check_server_key(
         &mut self,
-        _server_public_key: &key::PublicKey,
+        server_public_key: &key::PublicKey,
     ) -> Result<bool, Self::Error> {
-        Ok(true)
+        if !self.known_hosts_path.exists() {
+            return Ok(false);
+        }
+        
+        match russh_keys::check_known_hosts_path(&self.host, self.port, server_public_key, &self.known_hosts_path) {
+            Ok(true) => Ok(true),
+            _ => Ok(false),
+        }
     }
 }
 
@@ -177,7 +173,7 @@ impl TunnelService {
     }
 
     /// Start SSH tunnel
-    pub async fn start_tunnel(&self, tunnel_id: String) -> Result<(), String> {
+    pub async fn start_tunnel(&self, tunnel_id: String, known_hosts_path: std::path::PathBuf) -> Result<(), String> {
         // Check if tunnel is already running (not in error state)
         {
             let active_tunnels = self.active_tunnels.read().await;
@@ -246,6 +242,7 @@ impl TunnelService {
                 status.clone(),
                 error_message.clone(),
                 sessions_arc,
+                known_hosts_path,
             )
             .await
             {
@@ -321,8 +318,13 @@ impl TunnelService {
                 .map_err(|e| format!("Failed to get auto-start tunnels: {}", e))?
         };
 
+        // Create a fallback path for auto-start tunnels
+        let fallback_known_hosts = dirs::config_dir()
+            .map(|d| d.join("kerminal").join("known_hosts"))
+            .unwrap_or_else(|| std::path::PathBuf::from("known_hosts"));
+
         for tunnel in tunnels {
-            if let Err(e) = self.start_tunnel(tunnel.base.id.clone()).await {
+            if let Err(e) = self.start_tunnel(tunnel.base.id.clone(), fallback_known_hosts.clone()).await {
                 error!("Failed to auto-start tunnel {}: {}", tunnel.name, e);
             }
         }
@@ -338,8 +340,9 @@ impl TunnelService {
         status: Arc<RwLock<TunnelStatus>>,
         error_message: Arc<RwLock<Option<String>>>,
         sessions: Arc<RwLock<HashMap<String, Arc<Mutex<Handle<SSHClientHandler>>>>>>,
+        known_hosts_path: std::path::PathBuf,
     ) -> Result<()> {
-        let session = match Self::get_or_create_ssh_session(&profile, sessions).await {
+        let session = match Self::get_or_create_ssh_session(&profile, sessions, known_hosts_path).await {
             Ok(s) => s,
             Err(e) => {
                 let mut error_msg = error_message.write().await;
@@ -409,6 +412,7 @@ impl TunnelService {
     async fn get_or_create_ssh_session(
         profile: &SSHProfile,
         sessions: Arc<RwLock<HashMap<String, Arc<Mutex<Handle<SSHClientHandler>>>>>>,
+        known_hosts_path: std::path::PathBuf,
     ) -> Result<Arc<Mutex<Handle<SSHClientHandler>>>> {
         let session_key = format!("{}:{}@{}", profile.username, profile.port, profile.host);
 
@@ -420,7 +424,11 @@ impl TunnelService {
         }
 
         let config = Arc::new(Config::default());
-        let handler = SSHClientHandler;
+        let handler = SSHClientHandler {
+            host: profile.host.clone(),
+            port: profile.port,
+            known_hosts_path,
+        };
         let mut session =
             russh::client::connect(config, (&profile.host as &str, profile.port), handler).await?;
 

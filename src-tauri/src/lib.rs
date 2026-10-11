@@ -1,20 +1,5 @@
-/*
- * Kerminal - Modern Terminal Emulator & SSH Manager
- * Copyright (C) 2026 Bùi Thanh Xuân (klpod221)
- *
- * This program is free software: you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation, either version 3 of the License, or
- * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program.  If not, see <https://www.gnu.org/licenses/>.
- */
+// Copyright (C) 2026 Bùi Thanh Xuân (klpod221)
+// SPDX-License-Identifier: GPL-3.0-or-later
 
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
@@ -26,6 +11,7 @@ mod models;
 mod services;
 mod setup;
 mod state;
+mod utils;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn main() {
@@ -41,6 +27,8 @@ pub fn main() {
         .invoke_handler(tauri::generate_handler![
             commands::dashboard::get_system_info,
             commands::dashboard::verify_system_integrity,
+            commands::dashboard::execute_remote_docker_command,
+            commands::dashboard::get_remote_server_metrics,
             commands::terminal::create_terminal,
             commands::terminal::create_ssh_terminal,
             commands::terminal::create_ssh_config_terminal,
@@ -49,6 +37,7 @@ pub fn main() {
             commands::terminal::resize_terminal,
             commands::terminal::close_terminal,
             commands::terminal::get_terminal_info,
+            commands::terminal::get_terminal_metrics,
             commands::terminal::list_terminals,
             commands::system::get_user_hostname,
             commands::system::get_system_fonts,
@@ -162,6 +151,7 @@ pub fn main() {
             commands::sftp::sftp_read_file,
             commands::sftp::sftp_write_file,
             commands::sftp::sftp_search,
+            commands::sftp::sftp_clear_completed_transfers,
             commands::history::get_terminal_history,
             commands::history::search_history,
             commands::history::export_history,
@@ -175,6 +165,21 @@ pub fn main() {
             commands::terminal_profile::get_default_terminal_profile,
             commands::database::backup::export_backup,
             commands::database::backup::import_backup,
+            commands::ssh_host_key::inspect_ssh_host_key,
+            commands::ssh_host_key::trust_ssh_host_key,
+            commands::local_fs::local_fs_read_dir,
+            commands::local_fs::local_fs_read_file,
+            commands::local_fs::local_fs_read_text_file,
+            commands::local_fs::local_fs_write_file,
+            commands::local_fs::local_fs_write_text_file,
+            commands::local_fs::local_fs_stat,
+            commands::local_fs::local_fs_remove,
+            commands::local_fs::local_fs_rename,
+            commands::local_fs::local_fs_mkdir,
+            commands::docker::get_container_list,
+            commands::docker::execute_container_action,
+            commands::docker::get_container_logs,
+            commands::docker::get_container_stats,
         ])
         .setup(setup::init)
         .run(tauri::generate_context!())

@@ -1,4 +1,6 @@
-use crate::models::sftp::error::SFTPError;
+// Copyright (C) 2026 Bùi Thanh Xuân (klpod221)
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 use crate::models::sftp::file_entry::FileEntry;
 use crate::models::sftp::requests::{
     CancelTransferRequest, CompareDirectoriesRequest, ConnectSFTPRequest, CreateDirectoryRequest,
@@ -16,12 +18,7 @@ use crate::models::sftp::ConnectResponse;
 use crate::state::AppState;
 use tauri::State;
 
-/// Convert SFTPError to String for Tauri compatibility
-impl From<SFTPError> for String {
-    fn from(error: SFTPError) -> Self {
-        error.to_string()
-    }
-}
+// From<SftpError> for String is implemented in crate::services::sftp::errors
 
 /// Error conversion macro for SFTP operations
 macro_rules! sftp_result {
@@ -37,8 +34,10 @@ macro_rules! sftp_result {
 pub async fn sftp_connect(
     state: State<'_, AppState>,
     request: ConnectSFTPRequest,
+    app_handle: tauri::AppHandle,
 ) -> Result<ConnectResponse, String> {
-    let session_id = sftp_result!(state.sftp_service.connect(request.profile_id).await)?;
+    let known_hosts_path = crate::commands::ssh_host_key::get_known_hosts_path(&app_handle);
+    let session_id = sftp_result!(state.sftp_service.connect(request.profile_id, known_hosts_path).await)?;
 
     // Resolve $HOME server-side; gracefully degrade to "/" on older servers.
     let home_dir = state
@@ -409,4 +408,13 @@ pub async fn sftp_search(
             .search(request.session_id, request.path, request.query)
             .await
     )
+}
+
+/// Clear completed transfers from manager
+#[tauri::command]
+pub async fn sftp_clear_completed_transfers(
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    state.sftp_transfer_manager.clear_completed().await;
+    Ok(())
 }

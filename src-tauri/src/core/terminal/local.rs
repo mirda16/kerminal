@@ -1,20 +1,5 @@
-/*
- * Kerminal - Modern Terminal Emulator & SSH Manager
- * Copyright (C) 2026 Bùi Thanh Xuân (klpod221)
- *
- * This program is free software: you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation, either version 3 of the License, or
- * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program.  If not, see <https://www.gnu.org/licenses/>.
- */
+// Copyright (C) 2026 Bùi Thanh Xuân (klpod221)
+// SPDX-License-Identifier: GPL-3.0-or-later
 
 use crate::core::title_detector::TitleDetector;
 use crate::error::AppError;
@@ -211,7 +196,7 @@ impl LocalTerminal {
     /// Start reading from terminal and send output to the provided sender
     pub async fn start_read_loop(
         &mut self,
-        sender: mpsc::UnboundedSender<Vec<u8>>,
+        sender: Arc<crate::utils::output_buffer::TerminalOutputBuffer>,
         title_sender: Option<mpsc::UnboundedSender<String>>,
         exit_sender: Option<mpsc::UnboundedSender<TerminalExited>>,
         _latency_sender: Option<mpsc::UnboundedSender<crate::models::terminal::TerminalLatency>>,
@@ -239,6 +224,9 @@ impl LocalTerminal {
                                     warn!("Exit event channel closed for terminal {}", terminal_id);
                                 }
                             }
+                            tokio::runtime::Handle::current().block_on(async {
+                                sender.push_async(&[]).await;
+                            });
                             break;
                         }
                         Ok(n) => {
@@ -250,21 +238,21 @@ impl LocalTerminal {
                                 }
                             }
 
-                            if sender.send(data).is_err() {
-                                break;
-                            }
+                            tokio::runtime::Handle::current().block_on(async {
+                                sender.push_async(&data).await;
+                            });
                         }
                         Err(e) => {
                             error!("Failed to read from PTY: {}", e);
                             let error_msg = format!("PTY read error: {}", e).into_bytes();
-                            if sender.send(error_msg).is_err() {
-                                warn!("Data channel closed for terminal {}", terminal_id);
-                            }
+                            tokio::runtime::Handle::current().block_on(async {
+                                sender.push_async(&error_msg).await;
+                                // signal EOF
+                                sender.push_async(&[]).await;
+                            });
                             break;
                         }
                     }
-
-                    // Removed fixed sleep: PTY read naturally blocks when no data
                 }
             });
 

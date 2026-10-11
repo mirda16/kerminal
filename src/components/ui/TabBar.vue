@@ -1,3 +1,8 @@
+<!--
+  - Copyright (C) 2026 Bùi Thanh Xuân (klpod221)
+  - SPDX-License-Identifier: GPL-3.0-or-later
+-->
+
 <template>
   <div
     ref="tabBarRef"
@@ -163,7 +168,44 @@
         variant="ghost"
         size="sm"
         :icon="SplitSquareVertical"
+        data-tour="split-vertical-btn"
         @click="splitVertical"
+      />
+
+      <!-- Server Tools Button -->
+      <Button
+        v-if="!isMobile"
+        :title="isSSH ? 'Server Tools (Monitor & Docker)' : 'Local Machine Tools (Docker)'"
+        variant="ghost"
+        size="sm"
+        :icon="Activity"
+        :class="isSSH ? 'hover:text-green-400' : 'hover:text-blue-400'"
+        data-tour="server-tools-btn"
+        @click="toggleServerTools"
+      />
+
+      <!-- Broadcast Input Button -->
+      <Button
+        v-if="!isMobile"
+        :title="broadcastStore.isBroadcastEnabled ? 'Broadcast Input is ON (Ctrl+Shift+B) - Click to disable' : 'Broadcast Input (Ctrl+Shift+B) - Send keys to all panes'"
+        variant="ghost"
+        size="sm"
+        :icon="Radio"
+        :class="broadcastStore.isBroadcastEnabled ? 'text-amber-400 bg-amber-500/20 ring-1 ring-amber-500/50 animate-pulse' : 'text-gray-400 hover:text-white'"
+        data-tour="broadcast-btn"
+        @click="broadcastStore.toggleBroadcast"
+      />
+
+      <!-- Dangerous Command Protection Toggle Button -->
+      <Button
+        v-if="!isMobile"
+        :title="securityStore.isProtectionEnabled ? 'Dangerous Command Protection is ON (Click to disable)' : 'Dangerous Command Protection is OFF (Click to enable)'"
+        variant="ghost"
+        size="sm"
+        :icon="securityStore.isProtectionEnabled ? ShieldCheck : ShieldAlert"
+        :class="securityStore.isProtectionEnabled ? 'text-emerald-400 hover:text-emerald-300' : 'text-gray-500 hover:text-gray-400'"
+        data-tour="security-toggle-btn"
+        @click="securityStore.toggleProtection"
       />
 
       <!-- Add Tab Button on mobile -->
@@ -180,6 +222,7 @@
 
       <!-- Close Panel Button -->
       <Button
+        v-if="!isOnlyPanel"
         title="Close panel"
         variant="ghost"
         size="sm"
@@ -216,6 +259,10 @@ import {
   ChevronRight,
   Terminal,
   Settings,
+  Activity,
+  Radio,
+  ShieldCheck,
+  ShieldAlert,
 } from "lucide-vue-next";
 import Tab from "./Tab.vue";
 import Button from "./Button.vue";
@@ -228,6 +275,9 @@ import type {
   TerminalInstance,
 } from "../../types/panel";
 import ContextMenu, { type ContextMenuItem } from "./ContextMenu.vue";
+import { useWorkspaceStore } from "../../stores/workspace";
+import { useBroadcastStore } from "../../stores/broadcast";
+import { useSecurityStore } from "../../stores/security";
 
 interface TabBarProps {
   panel: Panel;
@@ -251,6 +301,7 @@ interface TabBarEmits {
   duplicateTab: [panelId: string, tabId: string];
   moveTabToNewPanel: [panelId: string, tabId: string];
   addTabWithProfile: [panelId: string, profile: any];
+  toggleServerTools: [panelId: string];
 }
 
 const props = withDefaults(defineProps<TabBarProps>(), {
@@ -258,6 +309,9 @@ const props = withDefaults(defineProps<TabBarProps>(), {
 });
 
 const emit = defineEmits<TabBarEmits>();
+const workspaceStore = useWorkspaceStore();
+const broadcastStore = useBroadcastStore();
+const securityStore = useSecurityStore();
 const { isMobile } = useWindowSize();
 
 const tabBarRef = ref<HTMLElement | null>(null);
@@ -277,6 +331,19 @@ const canScrollRight = computed(
   () => scrollOffset.value > -maxScrollOffset.value,
 );
 const showScrollButtons = computed(() => maxScrollOffset.value > 0);
+
+const isOnlyPanel = computed(() => workspaceStore.panelLayout.type === 'panel');
+
+const isSSH = computed(() => {
+  const activeTerminal = props.terminals?.find(t => t.id === props.panel.activeTabId);
+  const activeTab = props.panel.tabs?.find(t => t.id === props.panel.activeTabId);
+  return !!(
+    activeTerminal?.sshProfileId ||
+    activeTerminal?.sshConfigHost ||
+    activeTab?.profileId ||
+    (activeTab as any)?.sshConfigHost
+  );
+});
 
 /**
  * Get backend terminal ID for a tab
@@ -571,6 +638,10 @@ const handleCloseToRight = (tab: TabType): void => {
  */
 const handleMoveToNewPanel = (tab: TabType): void => {
   emit("moveTabToNewPanel", props.panel.id, tab.id);
+};
+
+const toggleServerTools = (): void => {
+  emit("toggleServerTools", props.panel.id);
 };
 
 const onTabDragStart = (_tab: TabType): void => {

@@ -1,3 +1,6 @@
+// Copyright (C) 2026 Bùi Thanh Xuân (klpod221)
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 use serde::{Deserialize, Serialize};
 
 /// Request for creating a new SSH terminal
@@ -38,5 +41,12 @@ pub struct CloseTerminalRequest {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct GetTerminalInfoRequest {
+    pub terminal_id: String,
+}
+
+/// Request for getting terminal metrics
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GetTerminalMetricsRequest {
     pub terminal_id: String,
 }

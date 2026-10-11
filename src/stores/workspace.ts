@@ -1,20 +1,5 @@
-/*
- * Kerminal - Modern Terminal Emulator & SSH Manager
- * Copyright (C) 2026 Bùi Thanh Xuân (klpod221)
- *
- * This program is free software: you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation, either version 3 of the License, or
- * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program.  If not, see <https://www.gnu.org/licenses/>.
- */
+// Copyright (C) 2026 Bùi Thanh Xuân (klpod221)
+// SPDX-License-Identifier: GPL-3.0-or-later
 
 import { defineStore } from "pinia";
 import { ref, nextTick } from "vue";
@@ -38,9 +23,12 @@ import {
   listenToTerminalOutput,
   listenToTerminalLatency,
 } from "../services/terminal";
-import { invoke } from "@tauri-apps/api/core";
+
 import { api } from "../services/api";
 import { TerminalRegistry } from "../core";
+import { useSSHStore } from "./ssh";
+import { showConfirm } from "../utils/message";
+import { collectAllPanels } from "../types/panel";
 import type {
   ResizeTerminalRequest,
   TerminalData,
@@ -259,7 +247,7 @@ export const useWorkspaceStore = defineStore("workspace", () => {
 
     // Check for default terminal profile
     try {
-      const defaultProfile = await invoke<any | null>(
+      const defaultProfile = await api.call<any | null>(
         "get_default_terminal_profile",
       );
       if (defaultProfile) {
@@ -693,6 +681,7 @@ export const useWorkspaceStore = defineStore("workspace", () => {
     let newTab: Tab;
     if (panel.activeTabId && panel.tabs.length > 0) {
       const activeTab = panel.tabs.find((tab) => tab.id === panel.activeTabId);
+      const sourceTerminal = terminals.value.find((t) => t.id === panel.activeTabId);
       if (activeTab) {
         const newTabId = tabCounter.toString();
         newTab = {
@@ -701,11 +690,16 @@ export const useWorkspaceStore = defineStore("workspace", () => {
           color: activeTab.color,
           profileId: activeTab.profileId,
           groupId: activeTab.groupId,
+          sshConfigHost: (activeTab as any).sshConfigHost,
         };
         const newTerminal: TerminalInstance = {
           id: newTabId,
           ready: false,
           shouldFocusOnReady: true,
+          sshProfileId: sourceTerminal?.sshProfileId || activeTab.profileId,
+          sshConfigHost: sourceTerminal?.sshConfigHost || (activeTab as any).sshConfigHost,
+          isSSHConnecting: !!(sourceTerminal?.sshProfileId || activeTab.profileId || sourceTerminal?.sshConfigHost || (activeTab as any).sshConfigHost),
+          canReconnect: sourceTerminal?.canReconnect,
         };
         terminals.value.push(newTerminal);
       } else {
@@ -753,6 +747,7 @@ export const useWorkspaceStore = defineStore("workspace", () => {
     let newTab: Tab;
     if (panel.activeTabId && panel.tabs.length > 0) {
       const activeTab = panel.tabs.find((tab) => tab.id === panel.activeTabId);
+      const sourceTerminal = terminals.value.find((t) => t.id === panel.activeTabId);
       if (activeTab) {
         const newTabId = tabCounter.toString();
         newTab = {
@@ -761,11 +756,16 @@ export const useWorkspaceStore = defineStore("workspace", () => {
           color: activeTab.color,
           profileId: activeTab.profileId,
           groupId: activeTab.groupId,
+          sshConfigHost: (activeTab as any).sshConfigHost,
         };
         const newTerminal: TerminalInstance = {
           id: newTabId,
           ready: false,
           shouldFocusOnReady: true,
+          sshProfileId: sourceTerminal?.sshProfileId || activeTab.profileId,
+          sshConfigHost: sourceTerminal?.sshConfigHost || (activeTab as any).sshConfigHost,
+          isSSHConnecting: !!(sourceTerminal?.sshProfileId || activeTab.profileId || sourceTerminal?.sshConfigHost || (activeTab as any).sshConfigHost),
+          canReconnect: sourceTerminal?.canReconnect,
         };
         terminals.value.push(newTerminal);
       } else {
@@ -997,6 +997,7 @@ export const useWorkspaceStore = defineStore("workspace", () => {
     if (!panel) return;
 
     const sourceTab = panel.tabs.find((tab) => tab.id === tabId);
+    const sourceTerminal = terminals.value.find((t) => t.id === tabId);
     if (!sourceTab) return;
 
     const newTabId = tabCounter.toString();
@@ -1006,12 +1007,17 @@ export const useWorkspaceStore = defineStore("workspace", () => {
       color: sourceTab.color,
       profileId: sourceTab.profileId,
       groupId: sourceTab.groupId,
+      sshConfigHost: (sourceTab as any).sshConfigHost,
     };
 
     const newTerminal: TerminalInstance = {
       id: newTabId,
       ready: false,
       shouldFocusOnReady: true, // Focus duplicated tabs when ready
+      sshProfileId: sourceTerminal?.sshProfileId || sourceTab.profileId,
+      sshConfigHost: sourceTerminal?.sshConfigHost || (sourceTab as any).sshConfigHost,
+      isSSHConnecting: !!(sourceTerminal?.sshProfileId || sourceTab.profileId || sourceTerminal?.sshConfigHost || (sourceTab as any).sshConfigHost),
+      canReconnect: sourceTerminal?.canReconnect,
     };
 
     const sourceIndex = panel.tabs.findIndex((tab) => tab.id === tabId);
@@ -1139,6 +1145,7 @@ export const useWorkspaceStore = defineStore("workspace", () => {
     if (!panel) return;
 
     const sourceTab = panel.tabs.find((tab) => tab.id === tabId);
+    const sourceTerminal = terminals.value.find((t) => t.id === tabId);
     if (!sourceTab) return;
 
     const newTabId = tabCounter.toString();
@@ -1148,12 +1155,17 @@ export const useWorkspaceStore = defineStore("workspace", () => {
       color: sourceTab.color,
       profileId: sourceTab.profileId,
       groupId: sourceTab.groupId,
+      sshConfigHost: (sourceTab as any).sshConfigHost,
     };
 
     const newTerminal: TerminalInstance = {
       id: newTabId,
       ready: false,
       shouldFocusOnReady: true,
+      sshProfileId: sourceTerminal?.sshProfileId || sourceTab.profileId,
+      sshConfigHost: sourceTerminal?.sshConfigHost || (sourceTab as any).sshConfigHost,
+      isSSHConnecting: !!(sourceTerminal?.sshProfileId || sourceTab.profileId || sourceTerminal?.sshConfigHost || (sourceTab as any).sshConfigHost),
+      canReconnect: sourceTerminal?.canReconnect,
     };
     terminals.value.push(newTerminal);
 
@@ -1309,19 +1321,40 @@ export const useWorkspaceStore = defineStore("workspace", () => {
       );
     } else if (profileId) {
       return withRetry(
-        () => createSSHTerminal(profileId), // assertion removed
-        { maxRetries: 2, retryDelay: 1000 },
+        async () => {
+          try {
+            return await createSSHTerminal(profileId);
+          } catch (e: any) {
+            const errMsg = JSON.stringify(e);
+            if (errMsg.includes("Unknown server key")) {
+              const profile = useSSHStore().findProfileById(profileId);
+              if (profile && profile.host) {
+                const inspection = await api.callRaw<any>("inspect_ssh_host_key", { host: profile.host, port: profile.port || 22 });
+                const msg = inspection.status === "changed" 
+                  ? `WARNING: The host key for ${profile.host} has CHANGED!\nFingerprint: ${inspection.fingerprint}\n\nDo you want to trust it anyway? (This could be a MITM attack)`
+                  : `The host key for ${profile.host} is unknown.\nFingerprint: ${inspection.fingerprint}\n\nDo you want to trust it?`;
+                const trusted = await showConfirm("SSH Host Key Verification", msg);
+                if (trusted) {
+                  await api.callRaw("trust_ssh_host_key", { host: profile.host, port: profile.port || 22, expectedFingerprint: inspection.fingerprint });
+                  return await createSSHTerminal(profileId);
+                } else {
+                  throw new Error("Host key verification rejected by user.");
+                }
+              }
+            }
+            throw e;
+          }
+        },
+        { maxRetries: 0, retryDelay: 1000 },
         context,
       );
     } else if (terminal.profileId) {
-      return invoke<CreateTerminalResponse>("create_terminal", {
-        request: {
-          shell: terminal.shell,
-          workingDir: terminal.workingDir,
-          title,
-          terminalProfileId: terminal.profileId,
-          command: terminal.command,
-        },
+      return api.call<CreateTerminalResponse>("create_terminal", {
+        shell: terminal.shell,
+        workingDir: terminal.workingDir,
+        title,
+        terminalProfileId: terminal.profileId,
+        command: terminal.command,
       });
     } else {
       return createLocalTerminal(terminal.shell, terminal.workingDir, title);
@@ -1363,6 +1396,12 @@ export const useWorkspaceStore = defineStore("workspace", () => {
         context,
       );
       terminal.backendTerminalId = response.terminalId;
+      if (profileId) {
+        terminal.sshProfileId = profileId;
+      }
+      if (tab?.sshConfigHost) {
+        terminal.sshConfigHost = tab.sshConfigHost;
+      }
     } catch (error) {
       const errorMessage = handleError(error, context);
       message.error(errorMessage);
@@ -1607,5 +1646,6 @@ export const useWorkspaceStore = defineStore("workspace", () => {
     findPanelInLayout: (panelId: string) =>
       findPanelInLayout(panelLayout.value, panelId),
     collectPanelIds: () => collectPanelIds(panelLayout.value),
+    getAllPanels: () => collectAllPanels(panelLayout.value),
   };
 });

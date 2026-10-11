@@ -1,3 +1,8 @@
+<!--
+  - Copyright (C) 2026 Bùi Thanh Xuân (klpod221)
+  - SPDX-License-Identifier: GPL-3.0-or-later
+-->
+
 <template>
   <Teleport to="body">
     <Transition
@@ -128,8 +133,8 @@ watch(
   () => [tourStore.currentStepIndex, tourStore.isActive],
   () => {
     if (tourStore.isActive) {
-      // Small delay to ensure DOM is ready
-      setTimeout(updateTargetPosition, 50);
+      // Delay to ensure view transition and DOM mounting complete
+      setTimeout(updateTargetPosition, 120);
     }
   },
   { immediate: true },

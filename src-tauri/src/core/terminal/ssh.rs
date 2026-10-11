@@ -1,20 +1,5 @@
-/*
- * Kerminal - Modern Terminal Emulator & SSH Manager
- * Copyright (C) 2026 Bùi Thanh Xuân (klpod221)
- *
- * This program is free software: you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation, either version 3 of the License, or
- * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program.  If not, see <https://www.gnu.org/licenses/>.
- */
+// Copyright (C) 2026 Bùi Thanh Xuân (klpod221)
+// SPDX-License-Identifier: GPL-3.0-or-later
 
 use crate::core::proxy::create_proxy_stream;
 use crate::error::AppError;
@@ -33,21 +18,27 @@ use tokio::sync::{mpsc, Mutex};
 /// SSH client handler implementation
 #[derive(Clone)]
 pub struct ClientHandler {
-    output_sender: Arc<Mutex<Option<mpsc::UnboundedSender<Vec<u8>>>>>,
+    output_sender: Arc<tokio::sync::Mutex<Option<Arc<crate::utils::output_buffer::TerminalOutputBuffer>>>>,
     exit_sender: Arc<Mutex<Option<mpsc::UnboundedSender<crate::models::terminal::TerminalExited>>>>,
     terminal_id: Arc<Mutex<String>>,
+    host: String,
+    port: u16,
+    known_hosts_path: std::path::PathBuf,
 }
 
 impl ClientHandler {
-    fn new(terminal_id: String) -> Self {
+    fn new(terminal_id: String, host: String, port: u16, known_hosts_path: std::path::PathBuf) -> Self {
         Self {
             output_sender: Arc::new(Mutex::new(None)),
             exit_sender: Arc::new(Mutex::new(None)),
             terminal_id: Arc::new(Mutex::new(terminal_id)),
+            host,
+            port,
+            known_hosts_path,
         }
     }
 
-    async fn set_output_sender(&self, sender: mpsc::UnboundedSender<Vec<u8>>) {
+    async fn set_output_sender(&self, sender: Arc<crate::utils::output_buffer::TerminalOutputBuffer>) {
         *self.output_sender.lock().await = Some(sender);
     }
 
@@ -65,9 +56,16 @@ impl Handler for ClientHandler {
 
     async fn check_server_key(
         &mut self,
-        _server_public_key: &PublicKey,
+        server_public_key: &PublicKey,
     ) -> Result<bool, Self::Error> {
-        Ok(true)
+        if !self.known_hosts_path.exists() {
+            return Ok(false); // Refuse if unknown (frontend must pre-probe)
+        }
+        
+        match russh_keys::check_known_hosts_path(&self.host, self.port, server_public_key, &self.known_hosts_path) {
+            Ok(true) => Ok(true),
+            _ => Ok(false),
+        }
     }
 
     async fn data(
@@ -77,7 +75,7 @@ impl Handler for ClientHandler {
         _session: &mut Session,
     ) -> Result<(), Self::Error> {
         if let Some(sender) = self.output_sender.lock().await.as_ref() {
-            let _ = sender.send(data.to_vec());
+            sender.push_async(data).await;
         }
         Ok(())
     }
@@ -90,7 +88,7 @@ impl Handler for ClientHandler {
         _session: &mut Session,
     ) -> Result<(), Self::Error> {
         if let Some(sender) = self.output_sender.lock().await.as_ref() {
-            let _ = sender.send(data.to_vec());
+            sender.push_async(data).await;
         }
         Ok(())
     }
@@ -102,7 +100,8 @@ impl Handler for ClientHandler {
     ) -> Result<(), Self::Error> {
         if let Some(sender) = self.output_sender.lock().await.as_ref() {
             let eof_msg = b"[SSH: Connection closed by remote host]\r\n";
-            let _ = sender.send(eof_msg.to_vec());
+            sender.push_async(eof_msg).await;
+            sender.push_async(&[]).await;
         }
 
         if let Some(sender) = self.exit_sender.lock().await.as_ref() {
@@ -156,7 +155,8 @@ impl Handler for ClientHandler {
 
         let output_sender = self.output_sender.lock().await;
         if let Some(sender) = output_sender.as_ref() {
-            let _ = sender.send(message.as_bytes().to_vec());
+            sender.push_async(message.as_bytes()).await;
+            sender.push_async(&[]).await;
         }
 
         let exit_sender = self.exit_sender.lock().await;
@@ -197,8 +197,14 @@ impl SSHTerminal {
         database_service: Option<
             Arc<tokio::sync::Mutex<crate::database::service::DatabaseService>>,
         >,
+        known_hosts_path: std::path::PathBuf,
     ) -> Result<Self, AppError> {
-        let handler = Arc::new(ClientHandler::new(id.clone()));
+        let handler = Arc::new(ClientHandler::new(
+            id.clone(),
+            ssh_profile.host.clone(),
+            ssh_profile.port,
+            known_hosts_path,
+        ));
         Ok(SSHTerminal {
             config,
             ssh_profile,
@@ -583,7 +589,12 @@ impl SSHTerminal {
 
         // Connect to the first jump host
         let first_jump = &jump_profiles[0];
-        let jump_handler = ClientHandler::new(format!("jump-{}", first_jump.host));
+        let jump_handler = ClientHandler::new(
+            format!("jump-{}", first_jump.host),
+            first_jump.host.clone(),
+            first_jump.port,
+            self.handler.known_hosts_path.clone(),
+        );
 
         let mut current_session: Handle<ClientHandler> = russh::client::connect(
             config.clone(),
@@ -606,7 +617,12 @@ impl SSHTerminal {
         // Chain through remaining jump hosts
         for i in 1..jump_profiles.len() {
             let next_jump = &jump_profiles[i];
-            let jump_handler = ClientHandler::new(format!("jump-{}", next_jump.host));
+            let jump_handler = ClientHandler::new(
+                format!("jump-{}", next_jump.host),
+                next_jump.host.clone(),
+                next_jump.port,
+                self.handler.known_hosts_path.clone(),
+            );
 
             // Open a direct TCP/IP channel to the next jump host
             let channel = current_session
@@ -844,7 +860,7 @@ impl SSHTerminal {
     /// Start reading from SSH terminal and send output to the provided sender
     pub async fn start_read_loop(
         &mut self,
-        sender: mpsc::UnboundedSender<Vec<u8>>,
+        sender: Arc<crate::utils::output_buffer::TerminalOutputBuffer>,
         _title_sender: Option<mpsc::UnboundedSender<String>>,
         exit_sender: Option<mpsc::UnboundedSender<crate::models::terminal::TerminalExited>>,
         latency_sender: Option<mpsc::UnboundedSender<crate::models::terminal::TerminalLatency>>,

@@ -1,3 +1,6 @@
+// Copyright (C) 2026 Bùi Thanh Xuân (klpod221)
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 export interface Tab {
   id: string;
   title: string;
@@ -114,7 +117,7 @@ export interface ResizeTerminalRequest {
 
 export interface TerminalData {
   terminalId: string;
-  data: number[]; // Vec<u8> from Rust
+  data: string; // Decoded string from Rust
 }
 
 export interface TerminalTitleChanged {
@@ -131,4 +134,16 @@ export interface TerminalExited {
 export interface TerminalLatency {
   terminalId: string;
   latencyMs: number;
+}
+
+export function collectAllPanels(layout: PanelLayout): Panel[] {
+  const result: Panel[] = [];
+  if (layout.type === "panel" && layout.panel) {
+    result.push(layout.panel);
+  } else if (layout.type === "split" && layout.children) {
+    for (const child of layout.children) {
+      result.push(...collectAllPanels(child));
+    }
+  }
+  return result;
 }

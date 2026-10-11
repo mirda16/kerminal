@@ -1,20 +1,5 @@
-/*
- * Kerminal - Modern Terminal Emulator & SSH Manager
- * Copyright (C) 2026 Bùi Thanh Xuân (klpod221)
- *
- * This program is free software: you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation, either version 3 of the License, or
- * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program.  If not, see <https://www.gnu.org/licenses/>.
- */
+// Copyright (C) 2026 Bùi Thanh Xuân (klpod221)
+// SPDX-License-Identifier: GPL-3.0-or-later
 
 import { defineStore } from "pinia";
 import { ref, computed } from "vue";
@@ -23,7 +8,7 @@ import type {
   CreateTerminalProfileRequest,
   UpdateTerminalProfileRequest,
 } from "../types/terminalProfile";
-import { invoke } from "@tauri-apps/api/core";
+import { api } from "../services/api";
 import { message } from "../utils/message";
 import { handleError, type ErrorContext } from "../utils/errorHandler";
 
@@ -44,7 +29,7 @@ export const useTerminalProfileStore = defineStore("terminalProfile", () => {
     };
 
     try {
-      const stored = await invoke<TerminalProfile[]>("list_terminal_profiles");
+      const stored = await api.call<TerminalProfile[]>("list_terminal_profiles");
       profiles.value = stored;
     } catch (error) {
       const errorMessage = handleError(error, context);
@@ -66,9 +51,9 @@ export const useTerminalProfileStore = defineStore("terminalProfile", () => {
     };
 
     try {
-      const newProfile = await invoke<TerminalProfile>(
+      const newProfile = await api.call<TerminalProfile>(
         "create_terminal_profile",
-        { request },
+        request,
       );
       profiles.value.push(newProfile);
       return newProfile;
@@ -89,7 +74,7 @@ export const useTerminalProfileStore = defineStore("terminalProfile", () => {
     };
 
     try {
-      const updatedProfile = await invoke<TerminalProfile>(
+      const updatedProfile = await api.callRaw<TerminalProfile>(
         "update_terminal_profile",
         { id, request },
       );
@@ -115,7 +100,7 @@ export const useTerminalProfileStore = defineStore("terminalProfile", () => {
     };
 
     try {
-      await invoke("delete_terminal_profile", { id });
+      await api.callRaw("delete_terminal_profile", { id });
       const index = profiles.value.findIndex((p) => p.id === id);
       if (index !== -1) {
         profiles.value.splice(index, 1);
@@ -144,7 +129,7 @@ export const useTerminalProfileStore = defineStore("terminalProfile", () => {
     };
 
     try {
-      await invoke("set_default_terminal_profile", { id });
+      await api.callRaw("set_default_terminal_profile", { id });
       // Update local state: clear previous default and set new one
       profiles.value.forEach((p) => {
         p.isDefault = p.id === id;
@@ -164,7 +149,7 @@ export const useTerminalProfileStore = defineStore("terminalProfile", () => {
     };
 
     try {
-      await invoke("clear_default_terminal_profile");
+      await api.call("clear_default_terminal_profile");
       profiles.value.forEach((p) => {
         p.isDefault = false;
       });

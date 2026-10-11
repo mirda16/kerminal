@@ -1,20 +1,5 @@
-/*
- * Kerminal - Modern Terminal Emulator & SSH Manager
- * Copyright (C) 2026 Bùi Thanh Xuân (klpod221)
- *
- * This program is free software: you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation, either version 3 of the License, or
- * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program.  If not, see <https://www.gnu.org/licenses/>.
- */
+// Copyright (C) 2026 Bùi Thanh Xuân (klpod221)
+// SPDX-License-Identifier: GPL-3.0-or-later
 
 use crate::core::proxy::create_proxy_stream;
 use crate::error::AppError;
@@ -23,6 +8,7 @@ use crate::models::history::{
     SearchHistoryResponse,
 };
 use crate::models::ssh::{AuthData, SSHProfile};
+use crate::utils::redaction::redact_secrets;
 use crate::models::terminal::TerminalType;
 use crate::services::ssh::SSHService;
 use crate::services::terminal::TerminalManager;
@@ -60,6 +46,7 @@ impl HistoryManager {
     pub async fn load_terminal_history(
         &self,
         terminal_id: &str,
+        known_hosts_path: std::path::PathBuf,
     ) -> Result<Vec<CommandHistoryEntry>, AppError> {
         // Check cache first
         {
@@ -83,7 +70,7 @@ impl HistoryManager {
             }
             TerminalType::SSH | TerminalType::SSHConfig => {
                 // Load from remote SSH server by executing command
-                self.load_remote_history(terminal_id).await?
+                self.load_remote_history(terminal_id, known_hosts_path).await?
             }
         };
 
@@ -123,6 +110,7 @@ impl HistoryManager {
     async fn load_remote_history(
         &self,
         terminal_id: &str,
+        known_hosts_path: std::path::PathBuf,
     ) -> Result<Vec<CommandHistoryEntry>, AppError> {
         // Get terminal info to get SSH profile
         let terminal_info = self
@@ -140,7 +128,7 @@ impl HistoryManager {
                     .ok_or_else(|| {
                         AppError::invalid_config("SSH profile ID not found".to_string())
                     })?;
-                self.load_remote_history_from_profile_id(profile_id).await
+                self.load_remote_history_from_profile_id(profile_id, known_hosts_path).await
             }
             TerminalType::SSHConfig => {
                 let ssh_config_host =
@@ -157,7 +145,7 @@ impl HistoryManager {
                     .to_temporary_profile(password)
                     .map_err(|e| AppError::Config(format!("Failed to create profile: {}", e)))?;
 
-                self.load_remote_history_from_profile(&temp_profile).await
+                self.load_remote_history_from_profile(&temp_profile, known_hosts_path).await
             }
             _ => Err(AppError::invalid_config(
                 "Terminal is not an SSH terminal".to_string(),
@@ -209,7 +197,7 @@ impl HistoryManager {
 
                     if !command.is_empty() {
                         entries.push(CommandHistoryEntry {
-                            command: command.to_string(),
+                            command: redact_secrets(command),
                             timestamp,
                             index,
                         });
@@ -227,7 +215,7 @@ impl HistoryManager {
 
                 if !command.is_empty() {
                     entries.push(CommandHistoryEntry {
-                        command: command.to_string(),
+                        command: redact_secrets(command),
                         timestamp: None,
                         index,
                     });
@@ -268,7 +256,7 @@ impl HistoryManager {
 
             if !command.is_empty() {
                 entries.push(CommandHistoryEntry {
-                    command: command.to_string(),
+                    command: redact_secrets(command),
                     timestamp: None, // Bash doesn't store timestamps by default
                     index,
                 });
@@ -285,8 +273,9 @@ impl HistoryManager {
     pub async fn get_history(
         &self,
         request: GetTerminalHistoryRequest,
+        known_hosts_path: std::path::PathBuf,
     ) -> Result<Vec<CommandHistoryEntry>, AppError> {
-        let mut history = self.load_terminal_history(&request.terminal_id).await?;
+        let mut history = self.load_terminal_history(&request.terminal_id, known_hosts_path).await?;
 
         // Apply limit if specified
         if let Some(limit) = request.limit {
@@ -302,8 +291,9 @@ impl HistoryManager {
     pub async fn search_history(
         &self,
         request: SearchHistoryRequest,
+        known_hosts_path: std::path::PathBuf,
     ) -> Result<SearchHistoryResponse, AppError> {
-        let history = self.load_terminal_history(&request.terminal_id).await?;
+        let history = self.load_terminal_history(&request.terminal_id, known_hosts_path).await?;
         let query_lower = request.query.to_lowercase();
 
         let mut filtered: Vec<CommandHistoryEntry> = history
@@ -327,7 +317,7 @@ impl HistoryManager {
     }
 
     /// Export history to file
-    pub async fn export_history(&self, request: ExportHistoryRequest) -> Result<String, AppError> {
+    pub async fn export_history(&self, request: ExportHistoryRequest, known_hosts_path: std::path::PathBuf) -> Result<String, AppError> {
         let history = if let Some(query) = &request.query {
             // Filter by query first
             let search_result = self
@@ -335,7 +325,7 @@ impl HistoryManager {
                     terminal_id: request.terminal_id.clone(),
                     query: query.clone(),
                     limit: None,
-                })
+                }, known_hosts_path.clone())
                 .await?;
             search_result.entries
         } else {
@@ -343,7 +333,7 @@ impl HistoryManager {
             self.get_history(GetTerminalHistoryRequest {
                 terminal_id: request.terminal_id.clone(),
                 limit: None,
-            })
+            }, known_hosts_path)
             .await?
         };
 
@@ -384,23 +374,25 @@ impl HistoryManager {
     async fn load_remote_history_from_profile_id(
         &self,
         profile_id: &str,
+        known_hosts_path: std::path::PathBuf,
     ) -> Result<Vec<CommandHistoryEntry>, AppError> {
         let profile = self
             .ssh_service
             .get_ssh_profile(profile_id)
             .await
             .map_err(|e| AppError::Database(e.to_string()))?;
-        self.load_remote_history_from_profile(&profile).await
+        self.load_remote_history_from_profile(&profile, known_hosts_path).await
     }
 
     /// Load history from remote using SSH profile
     async fn load_remote_history_from_profile(
         &self,
         profile: &SSHProfile,
+        known_hosts_path: std::path::PathBuf,
     ) -> Result<Vec<CommandHistoryEntry>, AppError> {
         // Create temporary SSH session to execute command
         let config = Arc::new(russh::client::Config::default());
-        let handler = RemoteCommandHandler::new();
+        let handler = RemoteCommandHandler::new(profile.host.clone(), profile.port, known_hosts_path);
 
         let mut session = if let Some(proxy_config) = &profile.proxy {
             let stream = create_proxy_stream(proxy_config, &profile.host, profile.port)
@@ -537,7 +529,7 @@ impl HistoryManager {
 
                     if !command.is_empty() {
                         entries.push(CommandHistoryEntry {
-                            command: command.to_string(),
+                            command: redact_secrets(command),
                             timestamp,
                             index,
                         });
@@ -552,7 +544,7 @@ impl HistoryManager {
                 }
                 if !command.is_empty() {
                     entries.push(CommandHistoryEntry {
-                        command: command.to_string(),
+                        command: redact_secrets(command),
                         timestamp: None,
                         index,
                     });
@@ -568,11 +560,15 @@ impl HistoryManager {
 
 /// Handler for executing remote commands
 #[derive(Clone)]
-struct RemoteCommandHandler;
+struct RemoteCommandHandler {
+    host: String,
+    port: u16,
+    known_hosts_path: std::path::PathBuf,
+}
 
 impl RemoteCommandHandler {
-    fn new() -> Self {
-        Self
+    fn new(host: String, port: u16, known_hosts_path: std::path::PathBuf) -> Self {
+        Self { host, port, known_hosts_path }
     }
 }
 
@@ -582,9 +578,16 @@ impl Handler for RemoteCommandHandler {
 
     async fn check_server_key(
         &mut self,
-        _server_public_key: &PublicKey,
+        server_public_key: &PublicKey,
     ) -> Result<bool, Self::Error> {
-        Ok(true)
+        if !self.known_hosts_path.exists() {
+            return Ok(false);
+        }
+        
+        match russh_keys::check_known_hosts_path(&self.host, self.port, server_public_key, &self.known_hosts_path) {
+            Ok(true) => Ok(true),
+            _ => Ok(false),
+        }
     }
 
     async fn data(

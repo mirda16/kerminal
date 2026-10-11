@@ -1,20 +1,5 @@
-/*
- * Kerminal - Modern Terminal Emulator & SSH Manager
- * Copyright (C) 2026 Bùi Thanh Xuân (klpod221)
- *
- * This program is free software: you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation, either version 3 of the License, or
- * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program.  If not, see <https://www.gnu.org/licenses/>.
- */
+// Copyright (C) 2026 Bùi Thanh Xuân (klpod221)
+// SPDX-License-Identifier: GPL-3.0-or-later
 
 import { defineStore } from "pinia";
 import { ref, computed } from "vue";
@@ -25,12 +10,11 @@ import type {
   SyncOperation,
   DiffEntry,
   SearchResult,
-  TransferProgress,
 } from "../types/sftp";
 import * as sftpService from "../services/sftp";
 import { api } from "../services/api";
 import { useSSHStore } from "./ssh";
-import { readDir, stat, remove } from "@tauri-apps/plugin-fs";
+
 import {
   withRetry,
   handleError,
@@ -43,9 +27,17 @@ import { message } from "../utils/message";
  * Manages SFTP sessions, file browsing, and transfers
  */
 
+interface LocalFileEntry {
+  name: string;
+  is_file: boolean;
+  is_dir: boolean;
+  size: number;
+  modified: number | null;
+}
+
 // Helper function to process directory entries
 async function processFileEntry(
-  entry: any,
+  entry: LocalFileEntry,
   path: string,
 ): Promise<FileEntry | null> {
   const normalizedPath = path.endsWith("/") ? path.slice(0, -1) : path;
@@ -54,37 +46,23 @@ async function processFileEntry(
       ? `/${entry.name}`
       : `${normalizedPath}/${entry.name}`;
 
-  try {
-    const meta = await stat(entryPath);
-
-    let fileType: FileEntry["fileType"] = "file";
-    if (meta.isDirectory) {
-      fileType = "directory";
-    } else if (entry.isSymlink || meta.isSymlink) {
-      fileType = "symlink";
-    }
-
-    let permissions = 0o644;
-    if (meta.mode) {
-      permissions = meta.mode & 0o777;
-    }
-
-    return {
-      name: entry.name,
-      path: entryPath,
-      fileType,
-      size: fileType === "file" ? meta.size || null : null,
-      permissions,
-      modified: new Date(meta.mtime || Date.now()).toISOString(),
-      accessed: meta.atime ? new Date(meta.atime).toISOString() : null,
-      symlinkTarget: null, // Would need readlink to get this
-      uid: null,
-      gid: null,
-    };
-  } catch (error) { // NOSONAR
-    // Failed to get metadata (expected for non-existent/inaccessible files)
-    return null;
+  let fileType: FileEntry["fileType"] = "file";
+  if (entry.is_dir) {
+    fileType = "directory";
   }
+
+  return {
+    name: entry.name,
+    path: entryPath,
+    fileType,
+    size: fileType === "file" ? entry.size || null : null,
+    permissions: 0o644,
+    modified: entry.modified ? new Date(entry.modified * 1000).toISOString() : new Date().toISOString(),
+    accessed: null,
+    symlinkTarget: null, 
+    uid: null,
+    gid: null,
+  };
 }
 
 /**
@@ -539,7 +517,7 @@ export const useSFTPStore = defineStore("sftp", () => {
     };
 
     try {
-      const entries = await readDir(path);
+      const entries = await api.callRaw<LocalFileEntry[]>("local_fs_read_dir", { path });
 
       const fileResults = await Promise.allSettled(
         entries.map((entry) => processFileEntry(entry, path)),
@@ -800,86 +778,6 @@ export const useSFTPStore = defineStore("sftp", () => {
 
   let unsubscribeTransferRealtime: (() => void) | null = null;
 
-  /** Pending listing refreshes after finished transfers, coalesced per pane */
-  const refreshTimers: Partial<
-    Record<"local" | "remote", ReturnType<typeof setTimeout>>
-  > = {};
-
-  const parentDir = (path: string): string => {
-    const trimmed = path.replace(/[\\/]+$/, "");
-    const index = Math.max(trimmed.lastIndexOf("/"), trimmed.lastIndexOf("\\"));
-    if (index < 0) return trimmed;
-    return index === 0 ? trimmed[0] : trimmed.slice(0, index);
-  };
-
-  const samePath = (a: string, b: string): boolean =>
-    a.replace(/[\\/]+$/, "") === b.replace(/[\\/]+$/, "");
-
-  /**
-   * Refresh the pane showing the destination of a finished transfer.
-   * Uploads are queued, so refreshing right after queueing missed the file.
-   */
-  function refreshAfterTransfer(progress: TransferProgress): void {
-    if (progress.status !== "completed") return;
-
-    const isUpload = progress.direction === "upload";
-    const pane = isUpload ? "remote" : "local";
-    const shownPath = isUpload
-      ? browserState.value.remotePath
-      : browserState.value.localPath;
-    const destination = isUpload ? progress.remotePath : progress.localPath;
-    if (!shownPath || !samePath(parentDir(destination), shownPath)) return;
-
-    clearTimeout(refreshTimers[pane]);
-    refreshTimers[pane] = setTimeout(() => {
-      delete refreshTimers[pane];
-      const sessionId = browserState.value.activeSessionId;
-      const refresh = isUpload
-        ? sessionId && listRemoteDirectory(sessionId, shownPath)
-        : listLocalDirectory(shownPath);
-      if (refresh) refresh.catch(() => {});
-    }, 300);
-  }
-
-  /** Temporary local copies being uploaded, keyed by transfer ID */
-  const tempUploads = new Map<string, string>();
-
-  async function releaseTempUpload(transferId: string): Promise<void> {
-    const tempPath = tempUploads.get(transferId);
-    if (!tempPath) return;
-    tempUploads.delete(transferId);
-    await remove(tempPath).catch((error) =>
-      console.warn("Failed to cleanup temp file:", tempPath, error),
-    );
-  }
-
-  /**
-   * Upload a temporary local file and delete it once the transfer ends.
-   * Uploads are only queued here, so the file must outlive this call.
-   * It is kept after a final failure so a manual retry still works.
-   */
-  async function uploadTempFile(
-    sessionId: string,
-    tempPath: string,
-    remotePath: string,
-  ): Promise<string> {
-    const transferId = await uploadFile(sessionId, tempPath, remotePath);
-    tempUploads.set(transferId, tempPath);
-
-    // A small file may have finished before we got its ID
-    const progress = await sftpService
-      .getSFTPTransferProgress(transferId)
-      .catch(() => null);
-    if (
-      progress?.status === "completed" ||
-      progress?.status === "cancelled"
-    ) {
-      await releaseTempUpload(transferId);
-    }
-
-    return transferId;
-  }
-
   /**
    * Start listening to realtime events
    */
@@ -928,14 +826,11 @@ export const useSFTPStore = defineStore("sftp", () => {
       const u2 = await api.listen<{ transferId: string }>(
         "sftp_transfer_complete",
         async (data) => {
-          // Also emitted on cancel
-          await releaseTempUpload(data.transferId);
           try {
             const progress = await sftpService.getSFTPTransferProgress(
               data.transferId,
             );
             browserState.value.activeTransfers.set(data.transferId, progress);
-            refreshAfterTransfer(progress);
           } catch (error) {
             const errorMessage = handleError(error, {
               operation: "Get Transfer Progress (Complete)",
@@ -1052,7 +947,6 @@ export const useSFTPStore = defineStore("sftp", () => {
     listRemoteDirectory,
     uploadFile,
     downloadFile,
-    uploadTempFile,
     cancelTransfer,
     compareDirectories,
     syncDirectories,

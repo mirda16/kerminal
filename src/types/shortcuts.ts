@@ -1,3 +1,6 @@
+// Copyright (C) 2026 Bùi Thanh Xuân (klpod221)
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 /**
  * Keyboard shortcut action types
  * Each action represents a specific functionality in the application
@@ -14,6 +17,7 @@ export enum ShortcutAction {
   NewTab = "newTab",
   CloseTab = "closeTab",
   NextTab = "nextTab",
+  ToggleBroadcast = "toggleBroadcast",
   SwitchToTab1 = "switchToTab1",
   SwitchToTab2 = "switchToTab2",
   SwitchToTab3 = "switchToTab3",

@@ -1,20 +1,5 @@
-/*
- * Kerminal - Modern Terminal Emulator & SSH Manager
- * Copyright (C) 2026 Bùi Thanh Xuân (klpod221)
- *
- * This program is free software: you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation, either version 3 of the License, or
- * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program.  If not, see <https://www.gnu.org/licenses/>.
- */
+// Copyright (C) 2026 Bùi Thanh Xuân (klpod221)
+// SPDX-License-Identifier: GPL-3.0-or-later
 
 pub mod local;
 pub mod ssh;
@@ -96,7 +81,7 @@ impl TerminalWrapper {
     /// Start reading from terminal and send output to the provided sender
     pub async fn start_read_loop(
         &mut self,
-        sender: mpsc::UnboundedSender<Vec<u8>>,
+        sender: Arc<crate::utils::output_buffer::TerminalOutputBuffer>,
         title_sender: Option<mpsc::UnboundedSender<String>>,
         exit_sender: Option<mpsc::UnboundedSender<TerminalExited>>,
         latency_sender: Option<mpsc::UnboundedSender<crate::models::terminal::TerminalLatency>>,
@@ -125,6 +110,7 @@ impl TerminalFactory {
         id: String,
         config: TerminalConfig,
         database_service: Option<Arc<Mutex<DatabaseService>>>,
+        app_handle: Option<tauri::AppHandle>,
     ) -> Result<TerminalWrapper, AppError> {
         match config.terminal_type {
             TerminalType::Local => {
@@ -156,11 +142,18 @@ impl TerminalFactory {
                         .map_err(|e| AppError::Database(e.to_string()))?
                 };
 
+                let known_hosts_path = if let Some(app) = &app_handle {
+                    crate::commands::ssh_host_key::get_known_hosts_path(app)
+                } else {
+                    std::path::PathBuf::from("known_hosts")
+                };
+
                 Ok(TerminalWrapper::Ssh(Box::new(ssh::SSHTerminal::new(
                     id,
                     config,
                     ssh_profile,
                     Some(database_service),
+                    known_hosts_path,
                 )?)))
             }
             TerminalType::SSHConfig => {
@@ -176,11 +169,18 @@ impl TerminalFactory {
                     .to_temporary_profile(password)
                     .map_err(|e| AppError::Config(format!("Failed to create profile: {}", e)))?;
 
+                let known_hosts_path = if let Some(app) = &app_handle {
+                    crate::commands::ssh_host_key::get_known_hosts_path(app)
+                } else {
+                    std::path::PathBuf::from("known_hosts")
+                };
+
                 Ok(TerminalWrapper::Ssh(Box::new(ssh::SSHTerminal::new(
                     id,
                     config,
                     ssh_profile,
                     database_service,
+                    known_hosts_path,
                 )?)))
             }
         }

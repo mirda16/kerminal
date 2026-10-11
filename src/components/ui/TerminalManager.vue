@@ -1,3 +1,8 @@
+<!--
+  - Copyright (C) 2026 Bùi Thanh Xuân (klpod221)
+  - SPDX-License-Identifier: GPL-3.0-or-later
+-->
+
 <template>
   <div class="w-full h-full relative">
     <!-- Mount point for teleported terminal -->
@@ -13,7 +18,12 @@ import { ref, watch, nextTick, onMounted, onBeforeUnmount } from "vue";
 import { debounce } from "../../utils/helpers";
 import type { TerminalInstance } from "../../types/panel";
 import { useWorkspaceStore } from "../../stores/workspace";
-import { TerminalRegistry, InputBatcher, FlowController } from "../../core";
+import { TerminalRegistry, createTerminalOutputWriter, createTerminalRendererHealthWatchdog } from "../../core";
+import { getTerminalMetrics } from "../../services/terminal";
+
+(window as any).getTerminalMetrics = async (id: string) => {
+  try { return await getTerminalMetrics(id); } catch (err) { console.error('Metrics error:', err); }
+};
 
 // Import Terminal component dynamically for creating instances
 import { Terminal } from "@xterm/xterm";
@@ -30,6 +40,7 @@ import { getTerminalTheme } from "../../utils/terminalTheme";
 import { loadWebGLRenderer } from "../../utils/terminalRenderer";
 import { onDevicePixelRatioChange } from "../../utils/devicePixelRatio";
 import { useSettingsStore } from "../../stores/settings";
+import { message } from "../../utils/message";
 
 interface TerminalManagerProps {
   terminals: TerminalInstance[];
@@ -42,10 +53,14 @@ const props = defineProps<TerminalManagerProps>();
 const workspaceStore = useWorkspaceStore();
 const settingsStore = useSettingsStore();
 
+import { useTerminalInputSecurity } from "../../composables/terminal/useTerminalInputSecurity";
+import { useBroadcastStore } from "../../stores/broadcast";
+const { handleTerminalInput } = useTerminalInputSecurity();
+const broadcastStore = useBroadcastStore();
+
 const mountPointRef = ref<HTMLElement | null>(null);
 
 let outputUnlisten: (() => void) | null = null;
-const inputBatcher = InputBatcher.getInstance();
 
 // Track currently mounted terminal
 const currentMountedId = ref<string | null>(null);
@@ -61,7 +76,7 @@ const createTerminalInstance = async (
 ): Promise<{
   term: Terminal;
   fitAddon: FitAddon;
-  flowController: FlowController;
+  outputWriter: any;
 }> => {
   const customTheme = settingsStore.getCustomTheme(settingsStore.terminalTheme);
   const theme = customTheme
@@ -83,7 +98,23 @@ const createTerminalInstance = async (
     theme: theme,
   });
 
-  await loadWebGLRenderer(term, settingsStore.useWebGLRenderer);
+  const webglAddon = await loadWebGLRenderer(term, settingsStore.useWebGLRenderer);
+  if (webglAddon) {
+    createTerminalRendererHealthWatchdog({
+      container: container,
+      renderer: {
+        backend: "webgl",
+        getTrackedCanvases: () => Array.from(container.querySelectorAll("canvas")),
+        reportHealth: (signal) => {
+          if (signal !== "healthy") {
+            message.warning("WebGL context lost! Falling back to DOM renderer.");
+            settingsStore.useWebGLRenderer = false;
+            try { webglAddon.dispose(); } catch (e) {}
+          }
+        }
+      }
+    });
+  }
 
   const fitAddon = new FitAddon();
   term.loadAddon(fitAddon);
@@ -120,21 +151,26 @@ const createTerminalInstance = async (
 
   term.open(container);
 
-  // Handle paste
+  // Handle custom key events
   term.attachCustomKeyEventHandler((arg: KeyboardEvent): boolean => {
     if (
       (arg.ctrlKey || arg.metaKey) &&
       arg.shiftKey &&
-      arg.key === "v" &&
       arg.type === "keydown"
     ) {
-      (async () => {
-        const clipboardText = await readText();
-        if (clipboardText) {
-          term.write(clipboardText);
-        }
-      })();
-      return false;
+      if (arg.key === "v") {
+        (async () => {
+          const clipboardText = await readText();
+          if (clipboardText) {
+            term.write(clipboardText);
+          }
+        })();
+        return false;
+      }
+      if (arg.key === "b" || arg.key === "B") {
+        broadcastStore.toggleBroadcast();
+        return false;
+      }
     }
     return true;
   });
@@ -161,11 +197,14 @@ const createTerminalInstance = async (
       .catch((error) => console.error("Failed to resize terminal:", error));
   });
 
-  // Initialize FlowController
-  const flowController = new FlowController();
-  flowController.attach(term);
+  // Initialize AdaptiveOutputWriter
+  const outputWriter = createTerminalOutputWriter(term, {
+    adaptive: true,
+    cadence: "focused",
+  });
+  outputWriter.setTuiCursorProtection(true);
 
-  return { term, fitAddon, flowController };
+  return { term, fitAddon, outputWriter };
 };
 
 /**
@@ -185,7 +224,7 @@ const ensureTerminalExists = async (terminalId: string): Promise<void> => {
   TerminalRegistry.registerTerminal(terminalId, container);
 
   // Create xterm instance
-  const { term, fitAddon, flowController } = await createTerminalInstance(
+  const { term, fitAddon, outputWriter } = await createTerminalInstance(
     terminalId,
     container,
   );
@@ -195,8 +234,17 @@ const ensureTerminalExists = async (terminalId: string): Promise<void> => {
     terminalId,
     term,
     fitAddon,
-    flowController,
+    outputWriter,
   );
+
+  // Attach input handler
+  TerminalRegistry.setInputHandler(terminalId, (data) => {
+    handleTerminalInput(terminalId, data, {
+      activeTerminalId: props.activeTerminalId || terminalId,
+      panels: workspaceStore.getAllPanels(),
+      allTerminals: workspaceStore.terminals,
+    });
+  });
 
   // Note: Fit will be done after mounting to panel (hidden host has no dimensions)
 
@@ -315,17 +363,17 @@ watch(
         await ensureTerminalExists(terminal.id);
       }
 
-      // Update input handler if backendTerminalId is set (uses safe replacement)
-      if (terminal.backendTerminalId) {
-        TerminalRegistry.setInputHandler(terminal.id, (data) => {
-          if (terminal.backendTerminalId) {
-            inputBatcher.batchInput(terminal.backendTerminalId, data);
-          }
+      // Update input handler (uses safe replacement)
+      TerminalRegistry.setInputHandler(terminal.id, (data) => {
+        handleTerminalInput(terminal.id, data, {
+          activeTerminalId: props.activeTerminalId || terminal.id,
+          panels: workspaceStore.getAllPanels(),
+          allTerminals: workspaceStore.terminals,
         });
-      }
+      });
     }
   },
-  { deep: true },
+  { deep: true, immediate: true },
 );
 
 // Send the current size once a terminal has a backend, and again when an SSH
@@ -416,15 +464,9 @@ onMounted(async () => {
         if (!matchingTerminal) return;
 
         const managed = TerminalRegistry.getTerminal(matchingTerminal.id);
-        // Pass raw bytes: chunks can end mid UTF-8 sequence, and xterm's
-        // decoder keeps that state between writes. Decoding each chunk on
-        // its own would turn split characters into U+FFFD and shift the cursor.
-        const output = new Uint8Array(terminalData.data);
-        if (managed?.flowController) {
-          managed.flowController.write(output);
-        } else if (managed?.term) {
-          // Fallback if no flow controller (shouldn't happen with new logic)
-          managed.term.write(output);
+        if (managed?.outputWriter) {
+          const strData = typeof terminalData.data === 'string' ? terminalData.data : new TextDecoder().decode(terminalData.data);
+          managed.outputWriter.write(strData);
         }
       },
     );
@@ -467,51 +509,12 @@ onBeforeUnmount(() => {
 </script>
 
 <style scoped>
-.terminal-mount-point {
-  contain: layout size;
-}
-
-.terminal-mount-point :deep(.terminal-container) {
-  width: 100%;
-  height: 100%;
-}
-
-.terminal-mount-point :deep(.xterm) {
-  width: 100%;
-  height: 100%;
-  padding: 4px;
-}
-
-.terminal-mount-point :deep(.xterm-viewport) {
-  width: 100% !important;
-  height: 100% !important;
-}
-
-.terminal-mount-point :deep(.xterm-screen) {
-  width: 100%;
-  height: 100%;
-  user-select: text;
-}
-
-/* Terminal cursor blink enhancement */
-.terminal-mount-point :deep(.xterm-cursor) {
-  animation: terminalCursor 1s infinite;
-}
-
-@keyframes terminalCursor {
-  0%,
-  50% {
-    opacity: 1;
-  }
-
-  51%,
-  100% {
-    opacity: 0;
-  }
-}
-
-/* Terminal selection styling */
-.terminal-mount-point :deep(.xterm-selection) {
-  background-color: rgba(255, 255, 255, 0.2) !important;
-}
+.terminal-mount-point { contain: layout size; }
+.terminal-mount-point :deep(.terminal-container) { width: 100%; height: 100%; }
+.terminal-mount-point :deep(.xterm) { width: 100%; height: 100%; padding: 4px; }
+.terminal-mount-point :deep(.xterm-viewport) { width: 100% !important; height: 100% !important; }
+.terminal-mount-point :deep(.xterm-screen) { width: 100%; height: 100%; user-select: text; }
+.terminal-mount-point :deep(.xterm-cursor) { animation: terminalCursor 1s infinite; }
+@keyframes terminalCursor { 0%, 50% { opacity: 1; } 51%, 100% { opacity: 0; } }
+.terminal-mount-point :deep(.xterm-selection) { background-color: rgba(255, 255, 255, 0.2) !important; }
 </style>

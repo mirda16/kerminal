@@ -1,3 +1,8 @@
+<!--
+  - Copyright (C) 2026 Bùi Thanh Xuân (klpod221)
+  - SPDX-License-Identifier: GPL-3.0-or-later
+-->
+
 <template>
   <Modal
     id="sftp-file-editor-modal"
@@ -51,8 +56,8 @@ import { useOverlay } from "../../composables/useOverlay";
 import { message } from "../../utils/message";
 import { useSFTPStore } from "../../stores/sftp";
 import type { FileEntry } from "../../types/sftp";
-import { readFile, writeFile } from "@tauri-apps/plugin-fs";
-
+import { api } from "../../services/api";
+import { readSFTPFile, writeSFTPFile } from "../../services/sftp";
 import type { editor } from "monaco-editor";
 
 const { closeOverlay, getOverlayProp } = useOverlay();
@@ -69,6 +74,17 @@ const file = getOverlayProp<FileEntry | null>(
   "file",
   null,
   null,
+);
+
+const overlaySessionId = getOverlayProp<string | null>(
+  "sftp-file-editor-modal",
+  "sessionId",
+  null,
+  null,
+);
+
+const activeSessionId = computed(
+  () => overlaySessionId.value || sftpStore.activeSessionId,
 );
 
 const initialLine = getOverlayProp<number | undefined>(
@@ -147,9 +163,9 @@ async function loadFileContent() {
     }
 
     if (isLocal.value) {
-      const fileContent = await readFile(file.value.path);
+      const fileContent = await api.callRaw<number[]>("local_fs_read_file", { path: file.value.path });
       const decoder = new TextDecoder();
-      const decoded = decoder.decode(fileContent);
+      const decoded = decoder.decode(new Uint8Array(fileContent));
 
       if (decoded.includes("\0")) {
         throw new Error("File appears to be binary, not text");
@@ -157,13 +173,11 @@ async function loadFileContent() {
 
       content.value = decoded;
     } else {
-      if (!sftpStore.activeSessionId) {
+      const sid = activeSessionId.value;
+      if (!sid) {
         throw new Error("No active SFTP session");
       }
-      content.value = await sftpStore.readFile(
-        sftpStore.activeSessionId,
-        file.value.path,
-      );
+      content.value = await readSFTPFile(sid, file.value.path);
     }
 
     // Scroll to line if specified
@@ -206,7 +220,7 @@ async function saveLocalFile() {
 
   const encoder = new TextEncoder();
   const fileContent = encoder.encode(content.value);
-  await writeFile(file.value.path, fileContent);
+  await api.callRaw("local_fs_write_file", { path: file.value.path, contents: Array.from(fileContent) });
   message.success("File saved successfully");
 
   if (sftpStore.browserState.localPath) {
@@ -216,23 +230,13 @@ async function saveLocalFile() {
 
 async function saveRemoteFile() {
   if (!file.value || !content.value) return;
-  if (!sftpStore.activeSessionId) {
+  const sid = activeSessionId.value;
+  if (!sid) {
     throw new Error("No active SFTP session");
   }
 
-  await sftpStore.writeFile(
-    sftpStore.activeSessionId,
-    file.value.path,
-    content.value,
-  );
+  await writeSFTPFile(sid, file.value.path, content.value);
   message.success("File saved successfully");
-
-  if (sftpStore.activeSessionId && sftpStore.browserState.remotePath) {
-    await sftpStore.listRemoteDirectory(
-      sftpStore.activeSessionId,
-      sftpStore.browserState.remotePath,
-    );
-  }
 }
 
 /**

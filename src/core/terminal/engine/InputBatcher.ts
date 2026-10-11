@@ -1,27 +1,12 @@
-/*
- * Kerminal - Modern Terminal Emulator & SSH Manager
- * Copyright (C) 2026 Bùi Thanh Xuân (klpod221)
- *
- * This program is free software: you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation, either version 3 of the License, or
- * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program.  If not, see <https://www.gnu.org/licenses/>.
- */
+// Copyright (C) 2026 Bùi Thanh Xuân (klpod221)
+// SPDX-License-Identifier: GPL-3.0-or-later
 
 /**
  * Input Batcher for Terminal Operations
  * Batches rapid terminal input to reduce Tauri invoke API calls
  */
 
-import { writeToTerminal, writeBatchToTerminal } from "../../services/terminal";
+import { writeToTerminal, writeBatchToTerminal } from "../../../services/terminal";
 
 /**
  * Batches terminal input to improve performance by reducing API calls
@@ -31,7 +16,6 @@ export class InputBatcher {
 
   private readonly pendingData: Map<string, string> = new Map();
   private readonly timeouts: Map<string, number> = new Map();
-  private readonly BATCH_DELAY = 16; // ~60fps, optimal for human typing
 
   /**
    * Get singleton instance
@@ -49,17 +33,31 @@ export class InputBatcher {
   public batchInput(terminalId: string, data: string): void {
     if (!terminalId || !data) return;
 
+    // Send single interactive keystrokes/control sequences immediately (0ms input latency)
+    if (!this.pendingData.has(terminalId) && data.length <= 16) {
+      writeToTerminal({
+        terminalId,
+        data,
+      }).catch((error) => {
+        console.error(
+          `Failed to send immediate input to terminal ${terminalId}:`,
+          error,
+        );
+      });
+      return;
+    }
+
     const currentData = this.pendingData.get(terminalId) || "";
     this.pendingData.set(terminalId, currentData + data);
 
-    const existingTimeout = this.timeouts.get(terminalId);
-    if (existingTimeout) {
-      clearTimeout(existingTimeout);
+    // If there's already a pending flush, let it batch.
+    if (this.timeouts.has(terminalId)) {
+      return;
     }
 
     const timeout = globalThis.setTimeout(() => {
       this.flushInput(terminalId);
-    }, this.BATCH_DELAY);
+    }, 0);
 
     this.timeouts.set(terminalId, timeout);
   }

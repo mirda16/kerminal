@@ -1,3 +1,6 @@
+// Copyright (C) 2026 Bùi Thanh Xuân (klpod221)
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
@@ -59,7 +62,7 @@ pub struct TerminalInfo {
 #[serde(rename_all = "camelCase")]
 pub struct TerminalData {
     pub terminal_id: String,
-    pub data: Vec<u8>,
+    pub data: String,
 }
 
 /// Request to create a new terminal

@@ -1,3 +1,6 @@
+// Copyright (C) 2026 Bùi Thanh Xuân (klpod221)
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 use std::collections::HashSet;
 use std::env;
 use std::process::Command;
@@ -38,13 +41,16 @@ pub fn get_system_fonts() -> Vec<String> {
     // Try to get fonts on macOS
     #[cfg(target_os = "macos")]
     {
-        // Try fc-list first (if fontconfig is installed)
-        if let Ok(output) = Command::new("fc-list").arg(":").arg("family").output() {
+        // Use system_profiler to list all fonts installed on macOS
+        if let Ok(output) = Command::new("system_profiler").arg("SPFontsDataType").output() {
             if let Ok(result) = String::from_utf8(output.stdout) {
                 for line in result.lines() {
-                    let font_name = line.split(',').next().unwrap_or("").trim();
-                    if !font_name.is_empty() {
-                        fonts.insert(font_name.to_string());
+                    let trimmed = line.trim();
+                    if trimmed.starts_with("Family:") {
+                        let font_name = trimmed.replace("Family:", "").trim().to_string();
+                        if !font_name.is_empty() {
+                            fonts.insert(font_name);
+                        }
                     }
                 }
             }

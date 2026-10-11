@@ -45,7 +45,7 @@
   "bundle": {
     "createUpdaterArtifacts": true,
     "publisher": "klpod221",
-    "license": "MIT",
+    "license": "GPL-3.0-or-later",
     "copyright": "klpod221",
     "homepage": "https://klpod221.com/kerminal",
     "active": true,
@@ -56,7 +56,8 @@
       "icons/128x128.png",
       "icons/128x128@2x.png",
       "icons/icon.icns",
-      "icons/icon.ico"
+      "icons/icon.ico",
+      "icons/icon.png"
     ],
     "longDescription": "A powerful, feature-rich terminal emulator with advanced SSH management, multi-device sync, and enterprise-grade encryption.",
     "shortDescription": "Modern Terminal Emulator & SSH Manager",

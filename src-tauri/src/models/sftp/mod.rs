@@ -1,3 +1,6 @@
+// Copyright (C) 2026 Bùi Thanh Xuân (klpod221)
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 pub mod error;
 pub mod file_entry;
 pub mod requests;
@@ -6,6 +9,7 @@ pub mod sync;
 pub mod transfer;
 
 // Re-export FileType which is commonly used
+#[allow(unused_imports)]
 pub use file_entry::FileType;
 
 use serde::{Deserialize, Serialize};

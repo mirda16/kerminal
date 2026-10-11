@@ -9,30 +9,23 @@
     "core:default",
     "opener:default",
     {
-      "identifier": "opener:allow-open-path",
+      "identifier": "opener:allow-open-url",
       "allow": [
-        {
-          "path": "**/*"
-        }
+        { "url": "http://*" },
+        { "url": "https://*" }
       ]
     },
     "store:default",
     "dialog:default",
     "fs:default",
-    "fs:write-all",
-    "fs:read-all",
-    "fs:read-dirs",
-    "fs:allow-rename",
-    "fs:allow-mkdir",
     "fs:allow-exists",
-    "fs:allow-watch",
     "fs:allow-stat",
     {
       "identifier": "fs:scope",
       "allow": [
-        {
-          "path": "**/*"
-        }
+        { "path": "$APPDATA/**" },
+        { "path": "$APPCONFIG/**" },
+        { "path": "$TEMP/**" }
       ]
     }
   ]

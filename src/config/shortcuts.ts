@@ -1,3 +1,6 @@
+// Copyright (C) 2026 Bùi Thanh Xuân (klpod221)
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 import type { KeyboardShortcut } from "../types/shortcuts";
 import { ShortcutAction } from "../types/shortcuts";
 
@@ -57,6 +60,14 @@ export const DEFAULT_SHORTCUTS: KeyboardShortcut[] = [
     category: "Terminal",
     defaultKey: "Tab",
     defaultModifiers: { ctrlKey: true }, // Ctrl on Windows/Linux, Cmd on Mac
+    customizable: true,
+  },
+  {
+    id: ShortcutAction.ToggleBroadcast,
+    label: "Toggle Broadcast Input",
+    category: "Terminal",
+    defaultKey: "b",
+    defaultModifiers: { ctrlKey: true, shiftKey: true }, // Ctrl+Shift+B on Windows/Linux, Cmd+Shift+B on Mac
     customizable: true,
   },
   {
